@@ -1,0 +1,44 @@
+### Active stop factors
+GET http://localhost:9090/api/v1/stop-factors
+
+### Conditions of a stop factor
+GET http://localhost:9090/api/v1/stop-factors/13/conditions
+
+### Clean client -> APPROVED (200)
+POST http://localhost:9090/api/v1/stop-factors/check
+Content-Type: application/json
+
+{
+  "scoringId": 1,
+  "creditHistoryStatuses": ["Open", "FullyPaid"],
+  "values": {
+    "numberOfActiveDisputes": 0, "numberOfUnjustifiedDisputesInPast": 0,
+    "numberOfRestructuringsLast12Months": 0, "countOfChangesObLast12Month": 0,
+    "numberOfRestructuringsFrom12To24Months": 0, "countOfChangesObFrom13To24Months": 0,
+    "creditInquiriesLast7Days": 3, "currentNumberOfDaysOverdue": 0, "currentAmountOfOverdue": 0,
+    "totalNumberOfNewOpenLoansInTheLast30Days": 1, "totalOpenCreditContracts": 2,
+    "overdue": {}
+  }
+}
+
+### Restructuring in 13-24 months + KIB transfer status -> UNDERWRITER (301)
+POST http://localhost:9090/api/v1/stop-factors/check
+Content-Type: application/json
+
+{
+  "scoringId": 2,
+  "creditHistoryStatuses": ["TransferredToOtherReportingInst"],
+  "values": { "numberOfRestructuringsFrom12To24Months": 1, "overdue": { "countWherePeriodFrom1To3MonthsAndOverdueFrom1To15": 7 } }
+}
+
+### Current overdue -> REJECTED (451)
+POST http://localhost:9090/api/v1/stop-factors/check
+Content-Type: application/json
+
+{
+  "scoringId": 3,
+  "values": { "currentNumberOfDaysOverdue": 5, "currentAmountOfOverdue": 1200.50 }
+}
+
+### Saved results of a scoring
+GET http://localhost:9090/api/v1/stop-factors/checks/3
