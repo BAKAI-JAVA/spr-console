@@ -1,4 +1,4 @@
-package kg.bakai.stopfactor.dto;
+package kg.bakai.stopfactor.dto.scoring;
 
 public record StopFactorDto(
         long id,

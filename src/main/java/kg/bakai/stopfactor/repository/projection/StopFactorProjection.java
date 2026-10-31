@@ -5,6 +5,8 @@ import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 
 public interface StopFactorProjection {
     long getStopFactorId();
+    long getStopFactorVersionId();
+    int getVersionNumber();
     String getStopFactorName();
     StopFactorStatus getCheckResult();
     String getCheckedValue();

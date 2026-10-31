@@ -1,4 +1,4 @@
-package kg.bakai.stopfactor.dto;
+package kg.bakai.stopfactor.enums;
 
 import lombok.Getter;
 

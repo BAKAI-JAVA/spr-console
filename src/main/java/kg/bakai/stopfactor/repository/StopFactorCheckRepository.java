@@ -12,7 +12,9 @@ public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck
 
     @Query(value = """
             select
-                sf.id as "stopFactorId",
+                coalesce(sf.root_id, sf.id) as "stopFactorId",
+                sf.id as "stopFactorVersionId",
+                sf.version_number as "versionNumber",
                 sf.name as "stopFactorName",
                 c.result as "checkResult",
                 c.checked_value as "checkedValue",
@@ -25,11 +27,13 @@ public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck
             left join stop_factors.stop_factor_condition sfc on sf.id = sfc.stop_factor_id and sfc.result = 'REJECTED'
             left join stop_factors.stop_factor_condition sfc2 on sf.id = sfc2.stop_factor_id and sfc2.result = 'UNDERWRITER'
             where c.scoring_id = :scoringId
-            order by sf.order_number
+            order by sf.order_number, sf.id
             """, nativeQuery = true)
     List<StopFactorProjection> findByScoringIdForProjection(long scoringId);
 
     @Modifying
     @Query("delete from StopFactorCheck c where c.scoringId = :scoringId")
     void deleteByScoringId(long scoringId);
+
+    boolean existsByProduct_Id(long productId);
 }

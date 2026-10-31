@@ -1,10 +1,10 @@
 package kg.bakai.stopfactor.service;
 
-import kg.bakai.stopfactor.dto.StopFactorCheckDto;
-import kg.bakai.stopfactor.dto.StopFactorCheckRequest;
-import kg.bakai.stopfactor.dto.StopFactorCheckResponse;
-import kg.bakai.stopfactor.dto.StopFactorConditionDto;
-import kg.bakai.stopfactor.dto.StopFactorDto;
+import kg.bakai.stopfactor.dto.scoring.StopFactorCheckDto;
+import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
+import kg.bakai.stopfactor.dto.scoring.StopFactorCheckResponse;
+import kg.bakai.stopfactor.dto.scoring.StopFactorConditionDto;
+import kg.bakai.stopfactor.dto.scoring.StopFactorDto;
 
 import java.util.List;
 

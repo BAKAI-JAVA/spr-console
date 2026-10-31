@@ -1,4 +1,4 @@
-package kg.bakai.stopfactor.dto;
+package kg.bakai.stopfactor.dto.scoring;
 
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;

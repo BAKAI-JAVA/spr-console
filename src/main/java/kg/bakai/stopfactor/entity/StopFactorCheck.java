@@ -20,6 +20,10 @@ public class StopFactorCheck extends BaseEntity {
     @Column(name = "scoring_id", nullable = false)
     private Long scoringId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
+    private Product product;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "stop_factor_id", nullable = false)
     private StopFactor stopFactor;

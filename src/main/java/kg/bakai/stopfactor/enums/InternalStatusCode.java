@@ -1,8 +1,8 @@
-package kg.bakai.stopfactor.dto;
+package kg.bakai.stopfactor.enums;
 
 import lombok.Getter;
 
-import static kg.bakai.stopfactor.dto.ScoringStatus.*;
+import static kg.bakai.stopfactor.enums.ScoringStatus.*;
 
 @Getter
 public enum InternalStatusCode {
@@ -100,6 +100,6 @@ public enum InternalStatusCode {
                 return val;
             }
         }
-        throw new IllegalArgumentException("Unknown InternalStatusCodes code: " + code);
+        throw new IllegalArgumentException("Неизвестный код InternalStatusCode: " + code);
     }
 }

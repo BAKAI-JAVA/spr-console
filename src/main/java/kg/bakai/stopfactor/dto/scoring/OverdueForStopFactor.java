@@ -1,4 +1,4 @@
-package kg.bakai.stopfactor.dto;
+package kg.bakai.stopfactor.dto.scoring;
 
 public record OverdueForStopFactor(
         int countWherePeriodFrom1To3MonthsAndOverdueFrom1To15,
