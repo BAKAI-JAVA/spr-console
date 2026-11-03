@@ -1,25 +1,22 @@
 package kg.bakai.stopfactor.service;
 
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckDto;
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckResponse;
+import kg.bakai.spr.core.kib.dto.ConsolidationDto;
+import kg.bakai.spr.core.kib.dto.IndividualReport;
+import kg.bakai.spr.core.kib.dto.response.CustomReport;
+import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
 import kg.bakai.stopfactor.dto.scoring.StopFactorConditionDto;
-import kg.bakai.stopfactor.dto.scoring.StopFactorDto;
+import kg.bakai.stopfactor.dto.scoring.StopFactorDecision;
+import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface StopFactorService {
+    StopFactorDecision check(long scoringId, CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate);
 
-    StopFactorCheckResponse check(StopFactorCheckRequest request);
+    void save(String name, String description);
 
-    List<StopFactorDto> getActiveStopFactors();
+    void saveCondition(StopFactorConditionDto dto);
 
-    List<StopFactorConditionDto> getConditions(long stopFactorId);
-
-    List<StopFactorCheckDto> getChecks(long scoringId);
-
-    /**
-     * @return true if any stop factor version or saved check refers to the product
-     */
-    boolean isProductUsed(long productId);
+    List<StopFactorProjection> findByScoringId(Long scoringId);
 }

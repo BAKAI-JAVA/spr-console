@@ -2,15 +2,18 @@ package kg.bakai.stopfactor.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
-import kg.bakai.stopfactor.dto.scoring.*;
+import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
 import kg.bakai.stopfactor.service.StopFactorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@Tag(name = "Scoring: stop factors", description = "Used by the scoring system")
+/**
+ * The check itself is not a REST endpoint: SPR calls {@link StopFactorService#check} directly with the KIB/OB reports.
+ * Stop factors and their conditions are managed through the console API (/api/v1/admin/stop-factors).
+ */
+@Tag(name = "Scoring: stop factors", description = "Results of stop factor checks of SPR scorings")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/stop-factors")
@@ -18,27 +21,9 @@ public class StopFactorController {
 
     private final StopFactorService stopFactorService;
 
-    @Operation(summary = "Check an application against all active stop factors")
-    @PostMapping("/check")
-    public StopFactorCheckResponse check(@Valid @RequestBody StopFactorCheckRequest request) {
-        return stopFactorService.check(request);
-    }
-
     @Operation(summary = "Saved results of a scoring, with the stop factor versions they were made with")
     @GetMapping("/checks/{scoringId}")
-    public List<StopFactorCheckDto> getChecks(@PathVariable long scoringId) {
-        return stopFactorService.getChecks(scoringId);
-    }
-
-    @Operation(summary = "Active stop factors (read-only view, manage them through the admin API)")
-    @GetMapping
-    public List<StopFactorDto> getActiveStopFactors() {
-        return stopFactorService.getActiveStopFactors();
-    }
-
-    @Operation(summary = "Conditions of the current version of a stop factor")
-    @GetMapping("/{stopFactorId}/conditions")
-    public List<StopFactorConditionDto> getConditions(@PathVariable long stopFactorId) {
-        return stopFactorService.getConditions(stopFactorId);
+    public List<StopFactorProjection> findByScoringId(@PathVariable long scoringId) {
+        return stopFactorService.findByScoringId(scoringId);
     }
 }

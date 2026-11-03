@@ -10,11 +10,11 @@ import lombok.Setter;
 @Setter
 @Entity
 @NoArgsConstructor
-@Table(name = "product", schema = "stop_factors")
+@Table(name = "product", schema = "public")
 public class Product extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "product_id_seq")
-    @SequenceGenerator(name = "product_id_seq", sequenceName = "product_id_generator", schema = "stop_factors", allocationSize = 1)
+    @SequenceGenerator(name = "product_id_seq", sequenceName = "product_id_generator", schema = "public", allocationSize = 1)
     private Long id;
 
     @Column(name = "name", nullable = false, unique = true, length = 255)

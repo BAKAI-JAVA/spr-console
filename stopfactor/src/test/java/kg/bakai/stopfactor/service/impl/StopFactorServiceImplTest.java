@@ -1,0 +1,577 @@
+package kg.bakai.stopfactor.service.impl;
+
+import kg.bakai.common.exception.BusinessValidationException;
+import kg.bakai.spr.core.kib.KibService;
+import kg.bakai.spr.core.kib.dto.ConsolidationDto;
+import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
+import kg.bakai.spr.core.kib.dto.IndividualReport;
+import kg.bakai.spr.core.kib.dto.LoanDto;
+import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
+import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
+import kg.bakai.spr.core.kib.dto.response.CustomReport;
+import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
+import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.stopfactor.calculator.*;
+import kg.bakai.stopfactor.dto.console.ConditionDto;
+import kg.bakai.stopfactor.dto.console.StopFactorRequest;
+import kg.bakai.stopfactor.dto.console.StopFactorResponse;
+import kg.bakai.stopfactor.dto.scoring.*;
+import kg.bakai.stopfactor.entity.StopFactor;
+import kg.bakai.stopfactor.entity.StopFactorCheck;
+import kg.bakai.stopfactor.entity.StopFactorCondition;
+import kg.bakai.stopfactor.entity.StopFactorMetric;
+import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.stopfactor.enums.InternalStatusCode;
+import kg.bakai.stopfactor.enums.StopFactorStatus;
+import kg.bakai.stopfactor.enums.StopFactorValueTypes;
+import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
+import kg.bakai.stopfactor.repository.StopFactorConditionRepository;
+import kg.bakai.stopfactor.repository.StopFactorMetricRepository;
+import kg.bakai.stopfactor.repository.StopFactorRepository;
+import kg.bakai.stopfactor.repository.projection.ProductProjection;
+import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
+import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.*;
+
+import static kg.bakai.spr.core.kib.dto.enums.LoanStatus.*;
+import static kg.bakai.spr.core.kib.dto.enums.RoleOfClient.*;
+import static kg.bakai.stopfactor.enums.CalculatorType.*;
+import static kg.bakai.stopfactor.enums.StopFactorStatus.*;
+import static kg.bakai.stopfactor.enums.StopFactorValueTypes.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests of the stop factor check, no database. Stop factors are built the way migration 004 left them:
+ * legacy ids 1..34 are version 1 with a metric and params.
+ */
+class StopFactorServiceImplTest {
+
+    private static final long SCORING_ID = 1L;
+    private static final LocalDate REQUEST_DATE = LocalDate.of(2026, 11, 3);
+
+    private final StopFactorRepository stopFactorRepository = mock(StopFactorRepository.class);
+    private final StopFactorConditionRepository conditionRepository = mock(StopFactorConditionRepository.class);
+    private final StopFactorCheckRepository checkRepository = mock(StopFactorCheckRepository.class);
+    private final StopFactorMetricRepository metricRepository = mock(StopFactorMetricRepository.class);
+    private final StopFactorConsoleService consoleService = mock(StopFactorConsoleService.class);
+    private final KibService kibService = mock(KibService.class);
+
+    private final List<StopFactor> activeStopFactors = new ArrayList<>();
+    private final List<StopFactorCondition> conditions = new ArrayList<>();
+    private OverdueForStopFactor kibOverdue = overdue(0);
+
+    private StopFactorServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        // same calculators as CalculatorConfig + the @Component calculators
+        CalculatorRegistry registry = new CalculatorRegistry(List.of(
+                new SimpleValueCalculator(KIB_ACTIVE_DISPUTES, StopFactorIntegerValueDto::numberOfActiveDisputes),
+                new SimpleValueCalculator(KIB_UNJUSTIFIED_DISPUTES, StopFactorIntegerValueDto::numberOfUnjustifiedDisputesInPast),
+                new SimpleValueCalculator(CURRENT_OVERDUE_DAYS, StopFactorIntegerValueDto::currentNumberOfDaysOverdue),
+                new SimpleValueCalculator(CURRENT_OVERDUE_AMOUNT, StopFactorIntegerValueDto::currentAmountOfOverdue),
+                new SimpleValueCalculator(OPEN_CREDITS_COUNT, StopFactorIntegerValueDto::totalOpenCreditContracts),
+                new RecentEventsCountCalculator(BUREAU_REQUESTS_COUNT,
+                        CreditHistoryEvents::bureauRequestsDaysAgo, 7, StopFactorIntegerValueDto::creditInquiriesLast7Days),
+                new RecentEventsCountCalculator(NEW_CREDITS_COUNT,
+                        CreditHistoryEvents::newCreditsDaysAgo, 30, StopFactorIntegerValueDto::totalNumberOfNewOpenLoansInTheLast30Days),
+                new KibRefusalStatusesCalculator(),
+                new OverdueBucketCountCalculator(),
+                new RestructuringCountCalculator()
+        ));
+        service = new StopFactorServiceImpl(stopFactorRepository, conditionRepository, checkRepository,
+                metricRepository, consoleService, new StopFactorValuesInitializer(kibService), registry);
+
+        when(stopFactorRepository.findCurrentActiveWithMetric()).thenReturn(activeStopFactors);
+        when(stopFactorRepository.findProductByScoringId(anyLong())).thenReturn(Optional.empty());
+        when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
+        when(conditionRepository.findAllByStopFactor_IdIn(anyCollection())).thenAnswer(invocation -> {
+            Collection<Long> stopFactorIds = invocation.getArgument(0);
+            return conditions.stream()
+                    .filter(c -> stopFactorIds.contains(c.getStopFactor().getId()))
+                    .toList();
+        });
+    }
+
+    @Nested
+    @DisplayName("Legacy rules (same as StopFactorLegacyServiceImpl)")
+    class LegacyRules {
+
+        @Test
+        void approvedWithNullCodeWhenNothingFires() {
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+
+            assertThat(check(new Application())).isEqualTo(new StopFactorDecision(APPROVED, null));
+        }
+
+        @Test
+        void numberConditionFiresOnlyWhenValueIsGreater() {
+            StopFactor bureau = stopFactor(8, BUREAU_REQUESTS_COUNT, Map.of("days", 7));
+            condition(bureau, REJECTED, INTEGER, "14");
+
+            assertThat(check(new Application().bureauRequests(14)).status()).isEqualTo(APPROVED);
+            assertThat(check(new Application().bureauRequests(15)).status()).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void underwriterConditionIsCheckedOnlyWhenNotRejected() {
+            // legacy stop factor 27: REJECTED > 9, UNDERWRITER > 6
+            StopFactor bucket = stopFactor(27, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 10));
+            condition(bucket, REJECTED, INTEGER, "9");
+            condition(bucket, UNDERWRITER, INTEGER, "6");
+
+            kibOverdue = overdue(6);
+            assertThat(check(new Application()).status()).isEqualTo(APPROVED);
+            kibOverdue = overdue(7);
+            assertThat(check(new Application()).status()).isEqualTo(UNDERWRITER);
+            kibOverdue = overdue(10);
+            assertThat(check(new Application()).status()).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void rejectedWinsOverUnderwriterOfAnotherStopFactor() {
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+            StopFactor openCredits = stopFactor(12, OPEN_CREDITS_COUNT, Map.of());
+            condition(openCredits, UNDERWRITER, INTEGER, "0");
+
+            StopFactorDecision decision = check(new Application().activeDisputes(1).consolidation("0", 0, 1));
+
+            assertThat(decision).isEqualTo(new StopFactorDecision(REJECTED, null));
+            assertThat(savedChecks()).extracting(StopFactorCheck::getResult).containsExactly(REJECTED, UNDERWRITER);
+        }
+
+        @Test
+        void anyUnderwriterSendsToUnderwriterWithNullCode() {
+            StopFactor openCredits = stopFactor(12, OPEN_CREDITS_COUNT, Map.of());
+            condition(openCredits, UNDERWRITER, INTEGER, "8");
+
+            assertThat(check(new Application().consolidation("0", 0, 9)))
+                    .isEqualTo(new StopFactorDecision(UNDERWRITER, null));
+        }
+
+        @Test
+        void currentOverdueDaysGive451EvenTogetherWithOtherRejectedStopFactors() {
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+            StopFactor overdueDays = stopFactor(9, CURRENT_OVERDUE_DAYS, Map.of());
+            condition(overdueDays, REJECTED, INTEGER, "0");
+
+            assertThat(check(new Application().activeDisputes(1).obCredit(3, null, null)))
+                    .isEqualTo(new StopFactorDecision(REJECTED, InternalStatusCode._451));
+        }
+
+        @Test
+        void currentOverdueAmountGives451() {
+            StopFactor overdueAmount = stopFactor(10, CURRENT_OVERDUE_AMOUNT, Map.of());
+            condition(overdueAmount, REJECTED, DOUBLE, "0");
+
+            assertThat(check(new Application().obCredit(0, "0.01", null)))
+                    .isEqualTo(new StopFactorDecision(REJECTED, InternalStatusCode._451));
+        }
+
+        @Test
+        void otherRejectedStopFactorsKeepNullCode() {
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+
+            assertThat(check(new Application().activeDisputes(1))).isEqualTo(new StopFactorDecision(REJECTED, null));
+        }
+
+        @Test
+        void refusalStatusOfAMainDebtorOrGuarantorLoanRejects() {
+            kibStatusesStopFactor();
+
+            StopFactorDecision decision = check(new Application()
+                    .loan(MainDebtor, Open)
+                    .loan(Guarantor, SoldToThirdParty)
+                    .loan(MainDebtor, WrittenOff));
+
+            assertThat(decision).isEqualTo(new StopFactorDecision(REJECTED, null));
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("SoldToThirdParty");
+        }
+
+        @Test
+        void refusalStatusOfACoDebtorLoanIsIgnored() {
+            kibStatusesStopFactor();
+
+            assertThat(check(new Application().loan(CoDebtor, WrittenOff)).status()).isEqualTo(APPROVED);
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo(StopFactorServiceImpl.NO_MATCHES);
+        }
+
+        @Test
+        void underwriterStatusSendsToUnderwriter() {
+            kibStatusesStopFactor();
+
+            assertThat(check(new Application().loan(MainDebtor, TransferredToOtherReportingInst)).status()).isEqualTo(UNDERWRITER);
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("TransferredToOtherReportingInst");
+        }
+
+        @Test
+        void withoutKibReportOnlyObCurrentOverdueIsChecked() {
+            kibStatusesStopFactor();
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+            stopFactor(9, CURRENT_OVERDUE_DAYS, Map.of());
+
+            StopFactorDecision decision = check(new Application().withoutKib().obCredit(4, null, null));
+
+            assertThat(decision).isEqualTo(new StopFactorDecision(APPROVED, null));
+            assertThat(savedChecks()).extracting(StopFactorCheck::getCheckedValue)
+                    .containsExactly(StopFactorServiceImpl.NO_MATCHES, "0.0", "4.0");
+            verifyNoInteractions(kibService);
+        }
+
+        @Test
+        void valuesAreTakenFromTheReportsLikeLegacy() {
+            stopFactor(4, RESTRUCTURING_COUNT, Map.of("source", "KIB", "periodFromMonth", 1, "periodToMonth", 12));
+            stopFactor(5, RESTRUCTURING_COUNT, Map.of("source", "OB", "periodFromMonth", 1, "periodToMonth", 12));
+            stopFactor(7, RESTRUCTURING_COUNT, Map.of("source", "OB", "periodFromMonth", 13, "periodToMonth", 24));
+            stopFactor(9, CURRENT_OVERDUE_DAYS, Map.of());
+            stopFactor(10, CURRENT_OVERDUE_AMOUNT, Map.of());
+
+            check(new Application()
+                    .loan(new LoanDto(MainDebtor, Open, 2, 0, 5))
+                    .loan(new LoanDto(Guarantor, Open, 1, 0, 12))
+                    .loan(new LoanDto(CoDebtor, Open, 10, 0, 99))                 // not the client's own loan
+                    .consolidation("1000", 0, 0)
+                    .obCredit(7, "100.25", REQUEST_DATE.minusMonths(3))          // changed in months 1-12
+                    .obCredit(0, null, REQUEST_DATE.minusMonths(15))             // changed in months 13-24
+                    .obCredit(0, "50", null));
+
+            assertThat(savedChecks()).extracting(StopFactorCheck::getCheckedValue).containsExactly(
+                    "3.0",       // 4:  KIB restructurings of main debtor + guarantor loans
+                    "1.0",       // 5:  OB changes in the last 12 months
+                    "1.0",       // 7:  OB changes in months 13-24
+                    "12.0",      // 9:  max(KIB days delay 12, OB overdue days 7)
+                    "1150.25"    // 10: KIB overdue 1000 + OB overdue 100.25 + 50
+            );
+            verify(kibService).getOverdueByPeriodAndCount(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
+        }
+
+        @Test
+        void stopFactorWithoutConditionsApproves() {
+            stopFactor(12, OPEN_CREDITS_COUNT, Map.of());
+
+            assertThat(check(new Application().consolidation("0", 0, 100)).status()).isEqualTo(APPROVED);
+        }
+
+        @Test
+        void everyActiveStopFactorIsSavedInOrderForTheScoring() {
+            stopFactor(1, KIB_REFUSAL_STATUSES, Map.of());
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of());
+
+            check(new Application());
+
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(1L, 2L, 3L);
+            assertThat(savedChecks()).allMatch(c -> c.getScoringId() == SCORING_ID);
+        }
+    }
+
+    @Nested
+    @DisplayName("New structure: versions, metrics, NO_DATA (after migration 004)")
+    class NewStructure {
+
+        @Test
+        void stopFactorEditedInConsoleIsCheckedByItsCurrentVersion() {
+            // version 2 of legacy stop factor 9 has id 35: the legacy switch threw "Unexpected value: 35"
+            StopFactor overdueDaysV2 = version(35, 9, CURRENT_OVERDUE_DAYS, Map.of());
+            condition(overdueDaysV2, REJECTED, INTEGER, "5");
+
+            StopFactorDecision decision = check(new Application().obCredit(6, null, null));
+
+            assertThat(decision).isEqualTo(new StopFactorDecision(REJECTED, InternalStatusCode._451));
+            StopFactorCheck check = savedChecks().getFirst();
+            assertThat(check.getStopFactor().getId()).isEqualTo(35L);
+            assertThat(check.getStopFactor().getFactorId()).isEqualTo(9L);
+            assertThat(check.getCheckedValue()).isEqualTo("6.0");
+        }
+
+        @Test
+        void conditionsAreTakenFromTheCurrentVersionNotFromVersionOne() {
+            // version 1 (closed, not active any more) rejected any overdue, version 2 only above 5 days
+            StopFactor overdueDaysV1 = stopFactor(9, CURRENT_OVERDUE_DAYS, Map.of());
+            activeStopFactors.remove(overdueDaysV1);
+            condition(overdueDaysV1, REJECTED, INTEGER, "0");
+            StopFactor overdueDaysV2 = version(35, 9, CURRENT_OVERDUE_DAYS, Map.of());
+            condition(overdueDaysV2, REJECTED, INTEGER, "5");
+
+            assertThat(check(new Application().obCredit(3, null, null))).isEqualTo(new StopFactorDecision(APPROVED, null));
+            verify(conditionRepository).findAllByStopFactor_IdIn(List.of(35L));
+        }
+
+        @Test
+        void newStopFactorOfALegacyMetricGetsTheLegacyValue() {
+            // created in the console, any id, no case in the legacy switch
+            StopFactor newDisputes = stopFactor(100, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(newDisputes, UNDERWRITER, INTEGER, "1");
+
+            assertThat(check(new Application().activeDisputes(2))).isEqualTo(new StopFactorDecision(UNDERWRITER, null));
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("2.0");
+        }
+
+        @Test
+        void periodWithoutALegacyValueGoesToUnderwriterAsNoData() {
+            // months 1..2 have no field in OverdueForStopFactor
+            StopFactor bucket = stopFactor(101, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 1, "periodToMonth", 2, "minOverdueDays", 1));
+            condition(bucket, REJECTED, INTEGER, "0");
+
+            assertThat(check(new Application())).isEqualTo(new StopFactorDecision(UNDERWRITER, null));
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo(StopFactorServiceImpl.NO_DATA);
+        }
+
+        @Test
+        void noDataDoesNotOverrideRejected() {
+            StopFactor disputes = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            condition(disputes, REJECTED, INTEGER, "0");
+            stopFactor(101, OVERDUE_BUCKET_COUNT, Map.of("periodFromMonth", 1, "periodToMonth", 2, "minOverdueDays", 1));
+
+            assertThat(check(new Application().activeDisputes(1))).isEqualTo(new StopFactorDecision(REJECTED, null));
+        }
+
+        @Test
+        void statusSavedInTheConsoleWithoutSpacesWorks() {
+            StopFactor kib = stopFactor(1, KIB_REFUSAL_STATUSES, Map.of());
+            condition(kib, REJECTED, ARRAY, "WrittenOff,SoldToThirdParty");
+
+            assertThat(check(new Application().loan(MainDebtor, SoldToThirdParty)).status()).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void unknownStatusInAConditionIsSkippedInsteadOfFailingTheScoring() {
+            StopFactor kib = stopFactor(1, KIB_REFUSAL_STATUSES, Map.of());
+            condition(kib, REJECTED, ARRAY, "NoSuchStatus, WrittenOff");
+
+            assertThat(check(new Application().loan(MainDebtor, WrittenOff)).status()).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void stringConditionIsAOneStatusList() {
+            StopFactor kib = stopFactor(1, KIB_REFUSAL_STATUSES, Map.of());
+            condition(kib, REJECTED, STRING, "WrittenOff");
+
+            assertThat(check(new Application().loan(Guarantor, WrittenOff)).status()).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void repeatedCheckReplacesPreviousResultsOfTheScoring() {
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+
+            check(new Application());
+
+            InOrder inOrder = inOrder(checkRepository);
+            inOrder.verify(checkRepository).deleteByScoringId(SCORING_ID);
+            inOrder.verify(checkRepository).saveAll(anyList());
+        }
+    }
+
+    @Nested
+    @DisplayName("Products (public.scoring -> public.product)")
+    class Products {
+
+        @Test
+        void scoringWithoutProductChecksAllStopFactorsLikeLegacy() {
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of()).getProductIds().add(5L);
+            stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of());
+
+            check(new Application());
+
+            assertThat(savedChecks()).hasSize(2).allMatch(c -> c.getProductId() == null);
+        }
+
+        @Test
+        void stopFactorLimitedToAnotherProductIsSkipped() {
+            ProductProjection product = productProjection(7L);
+            when(stopFactorRepository.findProductByScoringId(SCORING_ID)).thenReturn(Optional.of(product));
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of()).getProductIds().add(5L);
+            stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of()).getProductIds().add(7L);
+            stopFactor(4, KIB_ACTIVE_DISPUTES, Map.of());   // no products = every product
+
+            check(new Application());
+
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(3L, 4L);
+            assertThat(savedChecks()).allMatch(c -> c.getProductId() == 7L);
+        }
+
+        private ProductProjection productProjection(long id) {
+            ProductProjection projection = mock(ProductProjection.class);
+            when(projection.getId()).thenReturn(id);
+            return projection;
+        }
+    }
+
+    @Nested
+    @DisplayName("save, saveCondition, findByScoringId")
+    class OtherMethods {
+
+        @Test
+        void saveCreatesAStopFactorOfTheMetricWithThisName() {
+            StopFactorMetric metric = new StopFactorMetric();
+            metric.setId(2L);
+            when(metricRepository.findFirstByTitleOrNameTemplateOrderById("Количество активных споров КИБ", "Количество активных споров КИБ"))
+                    .thenReturn(Optional.of(metric));
+
+            service.save("Количество активных споров КИБ", "описание");
+
+            verify(consoleService).create(new StopFactorRequest(2L, "Количество активных споров КИБ", "описание",
+                    null, true, Map.of(), Set.of(), List.of(), null), StopFactorServiceImpl.SPR_USER);
+        }
+
+        @Test
+        void saveWithoutAMatchingMetricFails() {
+            when(metricRepository.findFirstByTitleOrNameTemplateOrderById(any(), any())).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.save("Неизвестный", null)).isInstanceOf(BusinessValidationException.class);
+            verifyNoInteractions(consoleService);
+        }
+
+        @Test
+        void saveConditionCreatesANewVersionReplacingTheConditionWithTheSameResult() {
+            StopFactorResponse current = new StopFactorResponse(9, 9, 1, true, "Текущее количество дней просрочки", null,
+                    true, 9, 6, "Текущие дни просрочки", CURRENT_OVERDUE_DAYS, Map.of(), Set.of(5L),
+                    List.of(new ConditionDto(11L, REJECTED, INTEGER, "0"), new ConditionDto(12L, UNDERWRITER, INTEGER, "-1")),
+                    null, null, null, null, null);
+            when(consoleService.get(9)).thenReturn(current);
+
+            service.saveCondition(new StopFactorConditionDto(9, "5", INTEGER, REJECTED));
+
+            ArgumentCaptor<StopFactorRequest> request = ArgumentCaptor.forClass(StopFactorRequest.class);
+            verify(consoleService).update(eq(9L), request.capture(), eq(StopFactorServiceImpl.SPR_USER));
+            assertThat(request.getValue().conditions()).containsExactly(
+                    new ConditionDto(12L, UNDERWRITER, INTEGER, "-1"),
+                    new ConditionDto(null, REJECTED, INTEGER, "5"));
+            assertThat(request.getValue().metricId()).isEqualTo(6L);
+            assertThat(request.getValue().name()).isEqualTo("Текущее количество дней просрочки");
+            assertThat(request.getValue().productIds()).containsExactly(5L);
+            assertThat(request.getValue().changeReason()).isNotBlank();
+        }
+
+        @Test
+        void findByScoringIdReturnsTheSavedChecks() {
+            StopFactorProjection projection = mock(StopFactorProjection.class);
+            when(checkRepository.findByScoringIdForProjection(SCORING_ID)).thenReturn(List.of(projection));
+
+            assertThat(service.findByScoringId(SCORING_ID)).containsExactly(projection);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Fixtures
+    // ------------------------------------------------------------------------------------------------
+
+    /** Version 1 (legacy id or a new stop factor), as migration 004 leaves it. */
+    private StopFactor stopFactor(long id, CalculatorType calculator, Map<String, Object> params) {
+        StopFactorMetric metric = new StopFactorMetric();
+        metric.setCalculator(calculator);
+        StopFactor stopFactor = new StopFactor("stop factor " + id, null);
+        stopFactor.setId(id);
+        stopFactor.setMetric(metric);
+        stopFactor.setParams(params);
+        activeStopFactors.add(stopFactor);
+        return stopFactor;
+    }
+
+    /** Version 2 of stop factor rootId, created by a console edit. */
+    private StopFactor version(long id, long rootId, CalculatorType calculator, Map<String, Object> params) {
+        StopFactor stopFactor = stopFactor(id, calculator, params);
+        stopFactor.setRootId(rootId);
+        stopFactor.setVersionNumber(2);
+        return stopFactor;
+    }
+
+    private void condition(StopFactor stopFactor, StopFactorStatus result, StopFactorValueTypes type, String value) {
+        StopFactorCondition condition = new StopFactorCondition();
+        condition.setStopFactor(stopFactor);
+        condition.setResult(result);
+        condition.setValueType(type);
+        condition.setValue(value);
+        conditions.add(condition);
+    }
+
+    /** Legacy stop factor 1 with its seed conditions. */
+    private void kibStatusesStopFactor() {
+        StopFactor kib = stopFactor(1, KIB_REFUSAL_STATUSES, Map.of());
+        condition(kib, REJECTED, ARRAY, "WrittenOff, SoldToThirdParty, OpenUnderLegalProceedings");
+        condition(kib, UNDERWRITER, ARRAY, "TransferredToOtherReportingInst");
+    }
+
+    /** KIB overdue counts: only "months 1-3, overdue 1-15 days" (read by legacy stop factor 27) is set. */
+    private static OverdueForStopFactor overdue(int months1To3Overdue1To15) {
+        return new OverdueForStopFactor(months1To3Overdue1To15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    private StopFactorDecision check(Application application) {
+        return service.check(SCORING_ID,
+                application.withKib ? new CustomReport() : null,
+                application.withKib ? new IndividualReport(application.generalInfo, application.loans) : null,
+                application.withKib ? application.consolidation : null,
+                new TotalDebtFinalResponse(application.obCredits),
+                REQUEST_DATE);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<StopFactorCheck> savedChecks() {
+        ArgumentCaptor<List<StopFactorCheck>> captor = ArgumentCaptor.forClass(List.class);
+        verify(checkRepository, atLeastOnce()).saveAll(captor.capture());
+        return captor.getValue();
+    }
+
+    /** The KIB and OB reports SPR passes to check(...), empty unless set. */
+    private static final class Application {
+        private boolean withKib = true;
+        private GeneralInfoDto generalInfo = new GeneralInfoDto(0, 0, 0);
+        private final List<LoanDto> loans = new ArrayList<>();
+        private ConsolidationDto consolidation = new ConsolidationDto(BigDecimal.ZERO, 0, 0);
+        private final List<TotalDebtReportData> obCredits = new ArrayList<>();
+
+        Application withoutKib() {
+            withKib = false;
+            return this;
+        }
+
+        Application activeDisputes(int count) {
+            generalInfo = new GeneralInfoDto(count, generalInfo.numberOfUnjustifiedDisputesInPast(), generalInfo.creditInquiriesLast7Days());
+            return this;
+        }
+
+        Application bureauRequests(int last7Days) {
+            generalInfo = new GeneralInfoDto(generalInfo.numberOfActiveDisputes(), generalInfo.numberOfUnjustifiedDisputesInPast(), last7Days);
+            return this;
+        }
+
+        Application loan(RoleOfClient role, LoanStatus status) {
+            return loan(new LoanDto(role, status, 0, 0, 0));
+        }
+
+        Application loan(LoanDto loan) {
+            loans.add(loan);
+            return this;
+        }
+
+        Application consolidation(String overdueAmount, int newLoansLast30Days, int openCredits) {
+            consolidation = new ConsolidationDto(new BigDecimal(overdueAmount), newLoansLast30Days, openCredits);
+            return this;
+        }
+
+        Application obCredit(long overdueDays, String overdueSum, LocalDate lastChangeDate) {
+            obCredits.add(new TotalDebtReportData(overdueDays, overdueSum != null ? new BigDecimal(overdueSum) : null, lastChangeDate));
+            return this;
+        }
+    }
+}

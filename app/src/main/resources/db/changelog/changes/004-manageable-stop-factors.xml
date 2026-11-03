@@ -7,30 +7,14 @@
 
     <!--
         Makes stop factors manageable:
-          * product           - credit products a stop factor can be limited to
+          * stop_factor_product - limits a stop factor to credit products of SPR (public.product, owned by SPR:
+                                 this changelog does not create it, locally see spr-dummy-tables.xml)
           * stop_factor_metric - what is measured (calculator) and which params it takes
           * stop_factor        - becomes versioned (root_id/version_number/valid_from/valid_to),
                                  points to a metric and stores its params
         Existing rows are kept with their ids: every existing stop factor becomes version 1 of itself,
         so stop_factor_condition and stop_factor_check rows stay valid without changes.
     -->
-
-    <changeSet id="004-create-product" author="stop-factor">
-        <createTable schemaName="stop_factors" tableName="product">
-            <column name="id" type="BIGINT">
-                <constraints primaryKey="true" nullable="false"/>
-            </column>
-            <column name="created_date" type="TIMESTAMP(6)"/>
-            <column name="updated_date" type="TIMESTAMP(6)"/>
-            <column name="name" type="VARCHAR(255)">
-                <constraints nullable="false" unique="true" uniqueConstraintName="uq_product_name"/>
-            </column>
-            <column name="description" type="VARCHAR(255)">
-                <constraints nullable="false"/>
-            </column>
-        </createTable>
-        <createSequence schemaName="stop_factors" sequenceName="product_id_generator" startValue="1" incrementBy="1"/>
-    </changeSet>
 
     <changeSet id="004-create-stop-factor-metric" author="stop-factor">
         <createTable schemaName="stop_factors" tableName="stop_factor_metric">
@@ -249,7 +233,7 @@
             <column name="product_id" type="BIGINT">
                 <constraints nullable="false"
                              foreignKeyName="fk_stop_factor_product_product"
-                             referencedTableSchemaName="stop_factors"
+                             referencedTableSchemaName="public"
                              referencedTableName="product"
                              referencedColumnNames="id"/>
             </column>
@@ -265,7 +249,7 @@
         <addColumn schemaName="stop_factors" tableName="stop_factor_check">
             <column name="product_id" type="BIGINT">
                 <constraints foreignKeyName="fk_stop_factor_check_product"
-                             referencedTableSchemaName="stop_factors"
+                             referencedTableSchemaName="public"
                              referencedTableName="product"
                              referencedColumnNames="id"/>
             </column>
