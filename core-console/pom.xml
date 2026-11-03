@@ -13,11 +13,7 @@
     <dependencies>
         <dependency>
             <groupId>kg.bakai</groupId>
-            <artifactId>common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>kg.bakai</groupId>
-            <artifactId>product</artifactId>
+            <artifactId>core-online</artifactId>
         </dependency>
         <dependency>
             <groupId>kg.bakai</groupId>

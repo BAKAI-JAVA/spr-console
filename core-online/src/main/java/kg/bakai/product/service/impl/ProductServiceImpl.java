@@ -6,16 +6,14 @@ import kg.bakai.common.exception.ConflictException;
 import kg.bakai.common.exception.NotFoundException;
 import kg.bakai.product.repository.ProductRepository;
 import kg.bakai.product.service.ProductService;
+import kg.bakai.product.port.ProductUsageChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Collection;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -23,6 +21,8 @@ import java.util.stream.Collectors;
 class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+    // Implemented by stopfactor: core-online cannot import stopfactor classes
+    private final ProductUsageChecker productUsageChecker;
 
     @Override
     @Transactional(readOnly = true)
@@ -65,23 +65,11 @@ class ProductServiceImpl implements ProductService {
     @Transactional
     public void delete(long id) {
         Product product = find(id);
+        if (productUsageChecker.isProductUsed(id)) {
+            throw new ConflictException("Продукт " + id + " используется стоп-факторами или проверками и не может быть удален");
+        }
         productRepository.delete(product);
         log.info("Продукт {} '{}' удален", id, product.getName());
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public boolean exists(long id) {
-        return productRepository.existsById(id);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Set<Long> findExistingIds(Collection<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return Set.of();
-        }
-        return productRepository.findAllById(ids).stream().map(Product::getId).collect(Collectors.toSet());
     }
 
     // Сравнение в Java: при локали C базы данных lower() в PostgreSQL не меняет кириллицу

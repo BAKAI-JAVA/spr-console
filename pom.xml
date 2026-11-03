@@ -16,22 +16,25 @@
     <description>stop-factor</description>
 
     <!--
-        Module graph (no cycles):
+        Module graph (one direction only, no cycles):
 
-            app ──► core-console ──► stopfactor ──► product ──► common
-                         └─────────────────────────────┘
+            app ──► core-console ──► stopfactor  ──► common
+                         └─────────► core-online ──► common
 
         common       - base entity, exceptions, REST error handling
-        product      - credit products (entity, repository, ProductService)
-        stopfactor   - stop factor domain and the scoring API used by SPR (/api/v1/stop-factors);
-                       uses ProductService to validate product ids
-        core-console - admin console REST API (/api/v1/admin/**); the only place that needs
-                       both modules at once (refuses to delete a product used by stop factors)
+        core-online  - credit products (packages kg.bakai.product.*), table public.product.
+                       Must NOT import stopfactor classes. Before deleting a product it asks
+                       ProductUsageChecker, implemented in core-console
+        stopfactor   - stop factor domain and the check used by SPR (StopFactorService).
+                       Must NOT import core-online classes: products are read from public.product with
+                       native queries of StopFactorRepository as ProductProjection
+        core-console - console REST API (/api/v1/admin/**); the only module that sees both
+                       stopfactor and core-online (StopFactorProductUsageChecker)
         app          - Spring Boot entry point, configuration, Liquibase changelogs
     -->
     <modules>
         <module>common</module>
-        <module>product</module>
+        <module>core-online</module>
         <module>stopfactor</module>
         <module>core-console</module>
         <module>app</module>
@@ -51,7 +54,7 @@
             </dependency>
             <dependency>
                 <groupId>kg.bakai</groupId>
-                <artifactId>product</artifactId>
+                <artifactId>core-online</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

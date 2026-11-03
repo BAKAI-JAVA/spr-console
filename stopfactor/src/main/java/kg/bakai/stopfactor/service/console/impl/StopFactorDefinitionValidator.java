@@ -1,6 +1,5 @@
 package kg.bakai.stopfactor.service.console.impl;
 
-import kg.bakai.product.service.ProductService;
 import kg.bakai.stopfactor.calculator.CalculatorRegistry;
 import kg.bakai.stopfactor.calculator.InvalidParamsException;
 import kg.bakai.stopfactor.calculator.StopFactorCalculator;
@@ -11,6 +10,8 @@ import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import kg.bakai.stopfactor.evaluation.ConditionValues;
+import kg.bakai.stopfactor.repository.StopFactorRepository;
+import kg.bakai.stopfactor.repository.projection.ProductProjection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +26,7 @@ class StopFactorDefinitionValidator {
     private static final Set<StopFactorStatus> CONDITION_RESULTS = EnumSet.of(StopFactorStatus.REJECTED, StopFactorStatus.UNDERWRITER);
 
     private final CalculatorRegistry calculatorRegistry;
-    private final ProductService productService;
+    private final StopFactorRepository stopFactorRepository;
 
     Map<String, Object> validateParams(StopFactorMetric metric, Map<String, Object> params, List<String> errors) {
         Map<String, Object> source = params != null ? params : Map.of();
@@ -90,7 +91,9 @@ class StopFactorDefinitionValidator {
         if (productIds == null || productIds.isEmpty()) {
             return;
         }
-        Set<Long> found = productService.findExistingIds(productIds);
+        Set<Long> found = stopFactorRepository.findProductsByIds(productIds).stream()
+                .map(ProductProjection::getId)
+                .collect(Collectors.toSet());
         productIds.stream()
                 .filter(id -> !found.contains(id))
                 .sorted()

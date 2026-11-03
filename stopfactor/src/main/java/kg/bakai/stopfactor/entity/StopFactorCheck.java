@@ -21,7 +21,8 @@ public class StopFactorCheck extends BaseEntity {
     @Column(name = "scoring_id", nullable = false)
     private Long scoringId;
 
-    // Plain id: product lives in another module, the FK is enforced by the database
+    // Product of public.product (SPR). Plain id: the stop factor module does not map the product table,
+    // the FK fk_stop_factor_check_product is enforced by the database
     @Column(name = "product_id")
     private Long productId;
 

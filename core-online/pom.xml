@@ -7,8 +7,8 @@
         <artifactId>stop-factor-parent</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
-    <artifactId>product</artifactId>
-    <description>Products: entity, admin API, ProductApi implementation</description>
+    <artifactId>core-online</artifactId>
+    <description>Credit products. Must not depend on stopfactor: asks it through ProductUsageChecker</description>
 
     <dependencies>
         <dependency>

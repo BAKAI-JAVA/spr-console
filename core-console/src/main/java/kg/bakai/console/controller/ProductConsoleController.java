@@ -3,7 +3,6 @@ package kg.bakai.console.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import kg.bakai.console.service.ProductConsoleService;
 import kg.bakai.product.dto.ProductDto;
 import kg.bakai.product.service.ProductService;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +18,6 @@ import java.util.List;
 public class ProductConsoleController {
 
     private final ProductService productService;
-    private final ProductConsoleService productConsoleService;
 
     @GetMapping
     public List<ProductDto> getAll() {
@@ -46,6 +44,6 @@ public class ProductConsoleController {
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable long id) {
-        productConsoleService.delete(id);
+        productService.delete(id);
     }
 }

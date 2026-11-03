@@ -1,0 +1,274 @@
+package kg.bakai.spr.core.stopfactor.internal.service;
+
+import kg.bakai.spr.core.kib.KibService;
+import kg.bakai.spr.core.kib.dto.ConsolidationDto;
+import kg.bakai.spr.core.kib.dto.IndividualReport;
+import kg.bakai.spr.core.kib.dto.LoanDto;
+import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
+import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
+import kg.bakai.spr.core.kib.dto.response.CustomReport;
+import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
+import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.spr.core.shared.InternalStatusCode;
+import kg.bakai.spr.core.stopfactor.StopFactorProjection;
+import kg.bakai.spr.core.stopfactor.StopFactorService;
+import kg.bakai.spr.core.stopfactor.dto.spr.*;
+import kg.bakai.spr.core.stopfactor.internal.entity.StopFactor;
+import kg.bakai.spr.core.stopfactor.internal.entity.StopFactorCheck;
+import kg.bakai.spr.core.stopfactor.internal.entity.StopFactorCondition;
+import kg.bakai.spr.core.stopfactor.internal.repository.StopFactorCheckRepository;
+import kg.bakai.spr.core.stopfactor.internal.repository.StopFactorConditionRepository;
+import kg.bakai.spr.core.stopfactor.internal.repository.StopFactorRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.jetbrains.annotations.NotNull;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.ToIntFunction;
+
+import static java.time.temporal.ChronoUnit.MONTHS;
+import static kg.bakai.spr.core.stopfactor.dto.spr.StopFactorStatus.*;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class StopFactorServiceImpl implements StopFactorService {
+
+    private final StopFactorCheckRepository stopFactorCheckRepository;
+    private final StopFactorConditionRepository stopFactorConditionRepository;
+    private final StopFactorRepository stopFactorRepository;
+    private final KibService kibService;
+
+    @Override
+    public StopFactorDecision check(
+            long scoringId,
+            CustomReport customReport, IndividualReport individualReport,
+            ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate
+    ) {
+        StopFactorStatus globalStopFactorStatus = APPROVED;
+        InternalStatusCode internalStatusCode = null;
+        StopFactorIntegerValueDto stopFactorIntegerValueDto = initializeStopFactorIntegerValueDto(customReport, individualReport, consolidationDto, totalDebt, requestDate);
+
+        var stopFactors = stopFactorRepository.findAllActive();
+        List<StopFactorCheck> stopFactorChecks = new ArrayList<>();
+
+        for (var s : stopFactors) {
+            double count = getVariableFunction(s.getId(), stopFactorIntegerValueDto);
+            StopFactorCheck stopFactorCheck = new StopFactorCheck(scoringId, s, String.valueOf(count));
+            stopFactorCheck = getStopFactorCheck(scoringId, individualReport, s, stopFactorCheck, count, REJECTED);
+
+            if (stopFactorCheck.getResult() != REJECTED) {
+                stopFactorCheck = getStopFactorCheck(scoringId, individualReport, s, stopFactorCheck, count, UNDERWRITER);
+            }
+            stopFactorChecks.add(stopFactorCheck);
+
+            if (stopFactorCheck.getResult() == REJECTED) {
+                globalStopFactorStatus = REJECTED;
+
+                if (s.getId() == 9 || s.getId() == 10) internalStatusCode = InternalStatusCode._451;
+
+
+            } else if (globalStopFactorStatus != REJECTED && stopFactorCheck.getResult() == UNDERWRITER) {
+                globalStopFactorStatus = UNDERWRITER;
+            }
+        }
+
+        stopFactorCheckRepository.saveAll(stopFactorChecks);
+
+        return new StopFactorDecision(globalStopFactorStatus, internalStatusCode);
+    }
+
+    @Override
+    public List<StopFactorProjection> findByScoringId(Long scoringId) {
+        return stopFactorCheckRepository.findByScoringIdForProjection(scoringId);
+    }
+
+        @Override
+        public void save(String name, String description) {
+            stopFactorRepository.save(new StopFactor(name, description));
+        }
+
+        @Override
+        public void saveCondition(StopFactorConditionDto dto) {
+            var condition = new StopFactorCondition();
+            var sf = new StopFactor();
+            sf.setId(dto.stopFactorId());
+            condition.setStopFactor(sf);
+            condition.setValue(dto.value());
+            condition.setValueType(dto.valueType());
+            condition.setResult(dto.result());
+            stopFactorConditionRepository.save(condition);
+        }
+
+        private StopFactorCheck getStopFactorCheck(long scoringId, IndividualReport individualReport, StopFactor s, StopFactorCheck stopFactorCheck, double count, StopFactorStatus expectedStatus) {
+            StopFactorCondition condition;
+            var optionalCondition = stopFactorConditionRepository.findByStopFactor_IdAndResult(s.getId(), expectedStatus);
+            if (optionalCondition.isPresent()) {
+                condition = optionalCondition.get();
+                if (condition.getValueType() == StopFactorValueTypes.ARRAY) {
+                    String[] array = condition.getValue().split(", ");
+                    List<LoanStatus> loanStatusList = getLoanStatuses(array);
+                    var result = checkLoanNotValidStatuses(individualReport, expectedStatus, loanStatusList);
+                    stopFactorCheck = new StopFactorCheck(scoringId, s, result.getValue());
+                    stopFactorCheck.setResult(result.getStatus());
+                } else if (condition.getValueType() == StopFactorValueTypes.INTEGER) {
+                    int conditionValue = Integer.parseInt(condition.getValue());
+                    stopFactorCheck = new StopFactorCheck(scoringId, s, String.valueOf(count));
+                    if (count > conditionValue) {
+                        stopFactorCheck.setResult(expectedStatus);
+                    }
+                } else if (condition.getValueType() == StopFactorValueTypes.DOUBLE) {
+                    double conditionValue = Double.parseDouble(condition.getValue());
+                    stopFactorCheck = new StopFactorCheck(scoringId, s, String.valueOf(count));
+                    if (count > conditionValue) {
+                        stopFactorCheck.setResult(expectedStatus);
+                    }
+                } else {
+                    log.error("Нужна доработка");
+                }
+            }
+            return stopFactorCheck;
+        }
+
+
+            private double getVariableFunction(long stopFactorId, StopFactorIntegerValueDto dto) {
+                return switch ((int) stopFactorId) {
+                    case 1, 13, 14, 15, 16, 19 -> 0;
+                    case 2 -> dto.numberOfActiveDisputes();
+                    case 3 -> dto.numberOfUnjustifiedDisputesInPast();
+                    case 4 -> dto.numberOfRestructuringsLast12Months();
+                    case 5 -> dto.countOfChangesObLast12Month();
+                    case 6 -> dto.numberOfRestructuringsFrom12To24Months();
+                    case 7 -> dto.countOfChangesObFrom13To24Months();
+                    case 8 -> dto.creditInquiriesLast7Days();
+                    case 9 -> dto.currentNumberOfDaysOverdue();
+                    case 10 -> dto.currentAmountOfOverdue();
+                    case 11 -> dto.totalNumberOfNewOpenLoansInTheLast30Days();
+                    case 12 -> dto.totalOpenCreditContracts();
+                    case 17 -> dto.overdue().countWherePeriodFrom7To12MonthsAndOverdueFrom1To10();
+                    case 18 -> dto.overdue().countWherePeriodFrom7To12MonthsAndOverdueFrom11To20();
+                    case 20 -> dto.overdue().countWherePeriodFrom13To24MonthsAndOverdueFrom1To10();
+                    case 21 -> dto.overdue().countWherePeriodFrom13To24MonthsAndOverdueFrom11To20();
+                    case 22 -> dto.overdue().countWherePeriodFrom13To24MonthsAndOverdueFrom21To30();
+                    case 23 -> dto.overdue().countWherePeriodFrom13To24MonthsAndOverdueFrom31();
+                    case 24 -> dto.overdue().countWherePeriodFrom25To36MonthsAndOverdueFrom1To60();
+                    case 25 -> dto.overdue().countWherePeriodFrom25To36MonthsAndOverdueFrom61To90();
+                    case 26 -> dto.overdue().countWherePeriodFrom25To36MonthsAndOverdueFrom91();
+                    case 27 -> dto.overdue().countWherePeriodFrom1To3MonthsAndOverdueFrom1To15();
+                    case 28 -> dto.overdue().countWherePeriodFrom1To3MonthsAndOverdueFrom16To30();
+                    case 29 -> dto.overdue().countWherePeriodFrom1To3MonthsAndOverdueFrom31();
+                    case 30 -> dto.overdue().countWherePeriodFrom4To6MonthsAndOverdueFrom1To15();
+                    case 31 -> dto.overdue().countWherePeriodFrom4To6MonthsAndOverdueFrom16To30();
+                    case 32 -> dto.overdue().countWherePeriodFrom4To6MonthsAndOverdueFrom31();
+                    case 33 -> dto.overdue().countWherePeriodFrom7To12MonthsAndOverdueFrom21To30();
+                    case 34 -> dto.overdue().countWherePeriodFrom7To12MonthsAndOverdueFrom31();
+                    default -> throw new IllegalStateException("Unexpected value: " + (int) stopFactorId);
+                };
+            }
+
+                private StopFactorIntegerValueDto initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
+                    if (customReport != null && individualReport != null && consolidationDto != null) {
+                        CountOfChanges countOfChangesOb = getCountOfChangesOb(totalDebt.getCredits(), requestDate);
+                        var overdue = kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay());
+                        return new StopFactorIntegerValueDto(
+                                individualReport.generalInfoDto().numberOfActiveDisputes(),
+                                individualReport.generalInfoDto().numberOfUnjustifiedDisputesInPast(),
+                                getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
+                                countOfChangesOb.countOfChangesObLast12Month(),
+                                getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsFrom12To24Months),
+                                countOfChangesOb.countOfChangesObFrom13To24Months(),
+                                individualReport.generalInfoDto().creditInquiriesLast7Days(),
+                                Math.max(getMaxOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getDaysDelay), totalDebt.getCredits().stream().mapToLong(TotalDebtReportData::getCurrentOverdueDaysCount).max().orElse(0)),
+                                consolidationDto.totalOverduePrincipalOrInterestOnAllOpenCreditContracts().doubleValue() +
+                                        (totalDebt.getCredits().stream().map(credit -> Optional.ofNullable(credit.getCurrentOverdueSum()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add)).doubleValue(),
+                                consolidationDto.totalNumberOfNewOpenLoansInTheLast30Days(),
+                                consolidationDto.totalOpenCreditContracts(),
+                                overdue
+                        );
+                    }
+
+                    return new StopFactorIntegerValueDto(
+                            totalDebt.getCredits().stream().mapToLong(TotalDebtReportData::getCurrentOverdueDaysCount).max().orElse(0),
+                            (totalDebt.getCredits().stream().map(credit -> Optional.ofNullable(credit.getCurrentOverdueSum()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add)).doubleValue()
+                    );
+
+                }
+
+                private static @NotNull List<LoanStatus> getLoanStatuses(String[] array) {
+                    List<LoanStatus> loanStatusList = new ArrayList<>();
+                    for (String a : array) {
+                        loanStatusList.add(LoanStatus.valueOf(a));
+                    }
+                    return loanStatusList;
+                }
+
+                private static StopFactorResult checkLoanNotValidStatuses(IndividualReport individualReport, StopFactorStatus expectedStatus, List<LoanStatus> loanStatusList) {
+                    if (individualReport != null) {
+                        for (LoanDto loan : individualReport.loanDtoList()) {
+                            if (
+                                    loan.getParticipationType() == RoleOfClient.MainDebtor ||
+                                            loan.getParticipationType() == RoleOfClient.Guarantor
+                            ) {
+                                if (loanStatusList.contains(loan.getLoanStatus())) {
+                                    return new StopFactorResult(expectedStatus, String.valueOf(loan.getLoanStatus()));
+                                }
+                            }
+                        }
+                    }
+                    return new StopFactorResult(APPROVED, "Нет совпадений");
+                }
+
+                private int getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(IndividualReport individualReport, ToIntFunction<LoanDto> variableFunction) {
+                    int count = 0;
+                    for (LoanDto l : individualReport.loanDtoList()) {
+                        int variable = variableFunction.applyAsInt(l);
+                        if (l.getParticipationType() == RoleOfClient.MainDebtor || l.getParticipationType() == RoleOfClient.Guarantor) {
+                            count += variable;
+                        }
+                    }
+                    return count;
+                }
+
+                    private int getMaxOfParamsWhereCustomerIsMainDebtorOrGuarantor(IndividualReport individualReport, ToIntFunction<LoanDto> variableFunction) {
+                        int max = 0;
+                        for (LoanDto l : individualReport.loanDtoList()) {
+                            int variable = variableFunction.applyAsInt(l);
+                            if (l.getParticipationType() == RoleOfClient.MainDebtor || l.getParticipationType() == RoleOfClient.Guarantor) {
+                                max = Math.max(max, variable);
+                            }
+                        }
+                        return max;
+                    }
+
+                    private CountOfChanges getCountOfChangesOb(List<TotalDebtReportData> credits, LocalDate requestDate) {
+
+                        int countOfChangesObLast12Month = 0;
+                        int countOfChangesObFrom13To24Months = 0;
+
+                        for (TotalDebtReportData item : credits) {
+                            if (item.getLastChangeDate() == null) {
+                                continue;
+                            }
+
+                            if (MONTHS.between(item.getLastChangeDate(), requestDate) <= 12) {
+                                countOfChangesObLast12Month++;
+                            }
+                            if (MONTHS.between(item.getLastChangeDate(), requestDate) >= 13 && MONTHS.between(item.getLastChangeDate(), requestDate) <= 24) {
+                                countOfChangesObFrom13To24Months++;
+                            }
+                        }
+
+                        return new CountOfChanges(countOfChangesObLast12Month, countOfChangesObFrom13To24Months);
+                    }
+
+                    public record CountOfChanges(
+                            int countOfChangesObLast12Month,
+                            int countOfChangesObFrom13To24Months
+                    ) {
+                    }
+                }

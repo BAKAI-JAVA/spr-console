@@ -2,10 +2,12 @@ package kg.bakai.stopfactor.repository;
 
 import jakarta.persistence.LockModeType;
 import kg.bakai.stopfactor.entity.StopFactor;
+import kg.bakai.stopfactor.repository.projection.ProductProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,6 +62,29 @@ public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
     List<StopFactor> findCurrentByMetricId(long metricId);
 
     boolean existsByMetric_Id(long metricId);
+
+    /**
+     * Product of the application being scored. Empty if the scoring has no product (legacy scorings) -
+     * then every active stop factor is checked, like before product limits existed.
+     * Tables of SPR in the public schema: scoring(id, product_id), product(id, name, description).
+     */
+    @Query(value = """
+            SELECT p.id AS id, p.name AS name, p.description AS description
+            FROM public.scoring s
+            JOIN public.product p ON p.id = s.product_id
+            WHERE s.id = :scoringId
+            """, nativeQuery = true)
+    Optional<ProductProjection> findProductByScoringId(long scoringId);
+
+    /**
+     * Products of public.product (SPR) with these ids; ids without a product are not returned.
+     */
+    @Query(value = """
+            SELECT p.id AS id, p.name AS name, p.description AS description
+            FROM public.product p
+            WHERE p.id IN (:productIds)
+            """, nativeQuery = true)
+    List<ProductProjection> findProductsByIds(Collection<Long> productIds);
 
     @Query(value = "SELECT EXISTS (SELECT 1 FROM stop_factors.stop_factor_product WHERE product_id = :productId)",
             nativeQuery = true)
