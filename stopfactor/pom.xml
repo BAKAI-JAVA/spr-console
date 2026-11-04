@@ -8,6 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>stopfactor</artifactId>
+    <name>stopfactor</name>
     <description>Stop factors: definitions, calculators, scoring API used by SPR. Does not depend on core-online: products (public.product) are read with native queries as ProductProjection.</description>
 
     <dependencies>

@@ -8,6 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>core-online</artifactId>
+    <name>core-online</name>
     <description>Credit products of SPR, read only. Must not depend on stopfactor</description>
 
     <dependencies>

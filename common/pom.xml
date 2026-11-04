@@ -8,6 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>common</artifactId>
+    <name>common</name>
     <description>Shared base entity, ProductSegment, exceptions and REST error handling</description>
 
     <dependencies>

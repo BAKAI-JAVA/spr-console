@@ -8,6 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>app</artifactId>
+    <name>app</name>
     <description>Runnable Spring Boot application assembling all modules</description>
 
     <dependencies>
