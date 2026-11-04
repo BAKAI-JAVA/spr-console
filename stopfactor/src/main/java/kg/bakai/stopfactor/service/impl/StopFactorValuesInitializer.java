@@ -8,6 +8,8 @@ import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
+import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
 import kg.bakai.stopfactor.dto.scoring.StopFactorIntegerValueDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -22,7 +24,7 @@ import static java.time.temporal.ChronoUnit.MONTHS;
 
 /**
  * Turns the KIB and OB reports of an application into the values stop factors are checked with.
- * The legacy StopFactorServiceImpl.initializeStopFactorIntegerValueDto and its helpers, the logic is not changed.
+ * {@link #values} is the legacy StopFactorServiceImpl.initializeStopFactorIntegerValueDto, the logic is not changed.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,9 +36,9 @@ class StopFactorValuesInitializer {
      * Without a full KIB report (custom report, individual report and consolidation) only the current overdue
      * from OB is known, all other values are 0.
      */
-    StopFactorIntegerValueDto initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport,
-                                                                  ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt,
-                                                                  LocalDate requestDate) {
+    StopFactorIntegerValueDto values(CustomReport customReport, IndividualReport individualReport,
+                                     ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt,
+                                     LocalDate requestDate) {
         List<TotalDebtReportData> obCredits = totalDebt.getCredits();
         long obOverdueDays = getMaxOverdueDays(obCredits);
         double obOverdueSum = getOverdueSum(obCredits);
@@ -61,6 +63,24 @@ class StopFactorValuesInitializer {
                 consolidationDto.totalOpenCreditContracts(),
                 overdue
         );
+    }
+
+    /**
+     * Raw events of the credit history. For now only the overdue episodes, the other lists stay null and their
+     * stop factors use the legacy values.
+     * <ul>
+     *     <li>without a full KIB report the client has no credit history: no episodes, every overdue count is 0,
+     *     like the legacy values;</li>
+     *     <li>SPR could not build the episodes (null): null, the overdue stop factors use the legacy counters.</li>
+     * </ul>
+     */
+    CreditHistoryEvents history(CustomReport customReport, IndividualReport individualReport,
+                                          ConsolidationDto consolidationDto, LocalDate requestDate) {
+        if (customReport == null || individualReport == null || consolidationDto == null) {
+            return new CreditHistoryEvents(List.of(), null, null, null);
+        }
+        List<OverdueEpisode> episodes = kibService.getOverdueEpisodes(customReport, requestDate.atStartOfDay());
+        return episodes != null ? new CreditHistoryEvents(List.copyOf(episodes), null, null, null) : null;
     }
 
     /**

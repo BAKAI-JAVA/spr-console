@@ -2,6 +2,7 @@ package kg.bakai.stopfactor.entity;
 
 import jakarta.persistence.*;
 import kg.bakai.common.entity.BaseEntity;
+import kg.bakai.common.enums.ProductSegment;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -71,6 +72,11 @@ public class StopFactor extends BaseEntity {
     @Column(name = "product_id", nullable = false)
     private Set<Long> productIds = new HashSet<>();
 
+    /** Segment of the products it applies to, null - every segment. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "segment", length = 32)
+    private ProductSegment segment;
+
     public StopFactor(String name, String description) {
         this.name = name;
         this.description = description;
@@ -78,6 +84,17 @@ public class StopFactor extends BaseEntity {
 
     public boolean isCurrent() {
         return validTo == null;
+    }
+
+    /**
+     * Whether an application of this product is checked by this stop factor: the segment must match (or be empty)
+     * and the product must be one of its products (or it has none). A scoring without product (productId null)
+     * ignores product limits, as before products existed.
+     */
+    public boolean appliesTo(Long productId, ProductSegment productSegment) {
+        boolean segmentMatches = segment == null || segment == productSegment;
+        boolean productMatches = productId == null || productIds.isEmpty() || productIds.contains(productId);
+        return segmentMatches && productMatches;
     }
 
     public Long getFactorId() {
@@ -97,6 +114,7 @@ public class StopFactor extends BaseEntity {
         next.metric = this.metric;
         next.params = new HashMap<>(this.params);
         next.productIds = new HashSet<>(this.productIds);
+        next.segment = this.segment;
         return next;
     }
 }

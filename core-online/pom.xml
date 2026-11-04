@@ -8,7 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>core-online</artifactId>
-    <description>Credit products. Must not depend on stopfactor: asks it through ProductUsageChecker</description>
+    <description>Credit products of SPR, read only. Must not depend on stopfactor</description>
 
     <dependencies>
         <dependency>

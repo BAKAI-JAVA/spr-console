@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 @Component
@@ -27,11 +26,12 @@ public class KibRefusalStatusesCalculator extends AbstractStopFactorCalculator {
         return List.of();
     }
 
+    /**
+     * The statuses are matched by the stop factor's condition against the loans of the KIB report, the
+     * calculator itself has no value to measure.
+     */
     @Override
     public Optional<CheckedValue> calculate(Map<String, Object> params, StopFactorCheckRequest request) {
-        List<String> statuses = request.creditHistoryStatuses() != null
-                ? request.creditHistoryStatuses().stream().filter(Objects::nonNull).toList()
-                : List.of();
-        return Optional.of(CheckedValue.ofValues(statuses));
+        return Optional.of(CheckedValue.ofValues(List.of()));
     }
 }

@@ -1,14 +1,17 @@
 package kg.bakai.product.dto;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import kg.bakai.common.enums.ProductSegment;
 
 import java.time.LocalDateTime;
 
+/**
+ * @param segmentType RETAIL or MSB: which segment stop factors check applications of this product
+ */
 public record ProductDto(
         Long id,
-        @NotBlank @Size(max = 255) String name,
-        @NotBlank @Size(max = 255) String description,
+        String name,
+        String description,
+        ProductSegment segmentType,
         LocalDateTime createdDate,
         LocalDateTime updatedDate
 ) {

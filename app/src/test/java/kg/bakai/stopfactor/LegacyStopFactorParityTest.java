@@ -40,18 +40,18 @@ import java.util.function.ToIntFunction;
 import static java.time.temporal.ChronoUnit.MONTHS;
 import static kg.bakai.stopfactor.enums.StopFactorStatus.*;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
  * Runs the legacy SPR algorithm (a copy of StopFactorLegacyServiceImpl) and the new StopFactorServiceImpl
- * on the same KIB/OB reports against the migrated database (stop factors 1..34 from 003-load-data, metrics and
- * params from 004-backfill-stop-factor) and checks that every stop factor gets the same result and checked
+ * on the same KIB/OB reports against the migrated database (stop factors 1..34 from changelog-1.2, metrics and
+ * params from changelog-1.3) and checks that every stop factor gets the same result and checked
  * value, and the application the same decision. Also checks scorings made before and after a stop factor change.
  * <p>
- * Every test runs in a transaction that is rolled back. Skipped if stop factors were already edited in the
- * console: the legacy algorithm only knows ids 1..34.
+ * The legacy algorithm only knows ids 1..34, so every test first brings the stop factors back to the state of
+ * changelog 1.3 ({@link #rewindToChangelog13()}) and SPR returns no overdue episodes, so the overdue stop factors
+ * read the legacy counters. Every test runs in a transaction that is rolled back.
  */
 @SpringBootTest
 @Transactional
@@ -78,10 +78,23 @@ class LegacyStopFactorParityTest {
 
     @BeforeEach
     void setUp() {
+        rewindToChangelog13();
         List<StopFactor> all = stopFactorRepository.findAll();
-        assumeTrue(!all.isEmpty() && all.stream().allMatch(sf -> sf.getVersionNumber() == 1 && sf.getId() <= 34),
-                "stop factors were edited after migration, the legacy algorithm cannot check them");
+        assertThat(all).hasSize(34).allMatch(sf -> sf.getVersionNumber() == 1 && sf.getId() <= 34 && sf.getSegment() == null);
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
+        when(kibService.getOverdueEpisodes(any(), any())).thenReturn(null);
+    }
+
+    /**
+     * Removes every version created after changelog 1.3 (changelog 1.4, console edits) and makes ids 1..34 current
+     * again. Rolled back with the test.
+     */
+    private void rewindToChangelog13() {
+        jdbcTemplate.update("DELETE FROM stop_factors.stop_factor_condition WHERE stop_factor_id > 34");
+        jdbcTemplate.update("DELETE FROM stop_factors.stop_factor_product WHERE stop_factor_id > 34");
+        jdbcTemplate.update("DELETE FROM stop_factors.stop_factor_check WHERE stop_factor_id > 34");
+        jdbcTemplate.update("DELETE FROM stop_factors.stop_factor WHERE id > 34");
+        jdbcTemplate.update("UPDATE stop_factors.stop_factor SET valid_to = NULL WHERE id <= 34");
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -206,7 +219,8 @@ class LegacyStopFactorParityTest {
 
     /**
      * Known difference: legacy returned a hardcoded 0 for 13, 14, 15, 16, 19 (inactive since 2024). Their periods
-     * have no value in the reports, so if someone activates them they go to the underwriter instead of always passing.
+     * have no legacy counter, so if someone activates them while SPR returns no overdue episodes, they go to the
+     * underwriter instead of always passing.
      */
     @Test
     void inactiveLegacyStopFactorsWithoutAValueGoToUnderwriterIfActivated() {
@@ -215,7 +229,7 @@ class LegacyStopFactorParityTest {
         stopFactorRepository.flush();
 
         long scoring = nextScoringId();
-        check(scoring, new Reports(null, null, null, List.of()));
+        check(scoring, new Reports(new GeneralInfoDto(0, 0, 0), List.of(), new ConsolidationDto(BigDecimal.ZERO, 0, 0), List.of()));
 
         assertThat(findChecks(scoring))
                 .filteredOn(p -> ids.contains(p.getStopFactorId()))
@@ -527,5 +541,17 @@ class LegacyStopFactorParityTest {
     }
 
     private record CountOfChanges(int countOfChangesObLast12Month, int countOfChangesObFrom13To24Months) {
+    }
+
+    /** The legacy StopFactorResult, with the getters the legacy code reads. */
+    private record StopFactorResult(StopFactorStatus status, String value) {
+
+        StopFactorStatus getStatus() {
+            return status;
+        }
+
+        String getValue() {
+            return value;
+        }
     }
 }

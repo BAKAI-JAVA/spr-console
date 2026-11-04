@@ -34,6 +34,4 @@ public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck
     @Modifying
     @Query("delete from StopFactorCheck c where c.scoringId = :scoringId")
     void deleteByScoringId(long scoringId);
-
-    boolean existsByProductId(long productId);
 }

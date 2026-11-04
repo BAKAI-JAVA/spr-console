@@ -19,4 +19,7 @@ public record OverdueForStopFactor(
         int countWherePeriodFrom25To36MonthsAndOverdueFrom61To90,
         int countWherePeriodFrom25To36MonthsAndOverdueFrom91
 ) {
+
+    /** No overdue in any period. */
+    public static final OverdueForStopFactor NONE = new OverdueForStopFactor(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }

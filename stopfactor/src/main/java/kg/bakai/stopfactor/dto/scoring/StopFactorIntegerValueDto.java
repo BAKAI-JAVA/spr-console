@@ -14,41 +14,8 @@ public record StopFactorIntegerValueDto(
         double totalOpenCreditContracts,
         OverdueForStopFactor overdue
 ) {
-    public StopFactorIntegerValueDto(
-            double currentNumberOfDaysOverdue,
-            double currentAmountOfOverdue
-    ) {
-        this(
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                currentNumberOfDaysOverdue,
-                currentAmountOfOverdue,
-                0,
-                0,
-                new OverdueForStopFactor(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0
-                )
-        );
+    /** Values without a KIB report: only the current overdue from OB is known, everything else is 0. */
+    public StopFactorIntegerValueDto(double currentNumberOfDaysOverdue, double currentAmountOfOverdue) {
+        this(0, 0, 0, 0, 0, 0, 0, currentNumberOfDaysOverdue, currentAmountOfOverdue, 0, 0, OverdueForStopFactor.NONE);
     }
 }

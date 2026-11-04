@@ -5,11 +5,15 @@
         xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
         https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
-    <include file="db/changelog/changes/001-create-schema.xml"/>
-    <include file="db/changelog/changes/002-create-tables.xml"/>
-    <include file="db/changelog/changes/003-load-data.xml"/>
-    <!-- LOCAL ONLY: dummies of SPR tables (public.product, public.scoring), in SPR they already exist -->
-    <include file="db/changelog/changes/spr-dummy-tables.xml"/>
-    <include file="db/changelog/changes/004-manageable-stop-factors.xml"/>
+    <!-- 1.1: tables (public.product, public.scoring, stop_factors.*) -->
+    <include file="db/changelog/changes/changelog-1.1.xml"/>
+    <!-- 1.2: stop factor data from CSV, test products and scorings -->
+    <include file="db/changelog/changes/changelog-1.2.xml"/>
+    <!-- 1.3: versioned stop factors, metrics, products -->
+    <include file="db/changelog/changes/changelog-1.3.xml"/>
+    <!-- 1.4: stop factor rules 2026, product segments (Retail / MSB) -->
+    <include file="db/changelog/changes/changelog-1.4.xml"/>
+    <!-- 1.5: LOCAL TEST DATA, skipped where the test products of 1.2 do not exist -->
+    <include file="db/changelog/changes/changelog-1.5.xml"/>
 
 </databaseChangeLog>

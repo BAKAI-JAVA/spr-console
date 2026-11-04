@@ -1,6 +1,7 @@
 package kg.bakai.stopfactor.dto.console;
 
 import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.common.enums.ProductSegment;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,6 +22,7 @@ public record StopFactorResponse(
         CalculatorType calculator,
         Map<String, Object> params,
         Set<Long> productIds,
+        ProductSegment segment,
         List<ConditionDto> conditions,
         LocalDateTime validFrom,
         LocalDateTime validTo,

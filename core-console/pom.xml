@@ -8,7 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>core-console</artifactId>
-    <description>Admin console REST API: manages products, metrics and stop factors</description>
+    <description>Admin console REST API: metrics and stop factors, read-only products</description>
 
     <dependencies>
         <dependency>

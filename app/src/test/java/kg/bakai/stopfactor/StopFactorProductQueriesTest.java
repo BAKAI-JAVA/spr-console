@@ -1,9 +1,6 @@
 package kg.bakai.stopfactor;
 
 import kg.bakai.common.exception.BusinessValidationException;
-import kg.bakai.common.exception.ConflictException;
-import kg.bakai.product.port.ProductUsageChecker;
-import kg.bakai.product.service.ProductService;
 import kg.bakai.stopfactor.dto.console.ConditionDto;
 import kg.bakai.stopfactor.dto.console.StopFactorRequest;
 import kg.bakai.stopfactor.dto.console.StopFactorResponse;
@@ -28,8 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Native product queries of the stop factor module (public.product read as ProductProjection, no core-online
- * classes) and the product usage check core-console gives to core-online. Runs against the database, every test
- * is rolled back. Test products have negative ids so they never clash with real ones.
+ * classes) and product limits of console stop factors. Runs against the database, every test is rolled back. Test products have negative ids so they never clash with real ones.
  */
 @SpringBootTest
 @Transactional
@@ -44,10 +40,6 @@ class StopFactorProductQueriesTest {
     private StopFactorRepository stopFactorRepository;
     @Autowired
     private StopFactorConsoleService stopFactorConsoleService;
-    @Autowired
-    private ProductUsageChecker productUsageChecker;
-    @Autowired
-    private ProductService productService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -98,7 +90,6 @@ class StopFactorProductQueriesTest {
         StopFactorResponse created = stopFactorConsoleService.create(stopFactorRequest(Set.of(PRODUCT_A, PRODUCT_B)), "test");
 
         assertThat(created.productIds()).containsExactlyInAnyOrder(PRODUCT_A, PRODUCT_B);
-        assertThat(stopFactorRepository.isProductUsed(PRODUCT_A)).isTrue();
     }
 
     @Test
@@ -109,43 +100,9 @@ class StopFactorProductQueriesTest {
                 .hasMessageNotContaining("продукт " + PRODUCT_A + " ");
     }
 
-    // ------------------------------------------------------------------------------------------------
-    // ProductUsageChecker (core-console) used by core-online before deleting a product
-    // ------------------------------------------------------------------------------------------------
-
-    @Test
-    void productNotUsedByStopFactorsCanBeDeleted() {
-        assertThat(productUsageChecker.isProductUsed(PRODUCT_A)).isFalse();
-
-        productService.delete(PRODUCT_A);
-
-        assertThat(stopFactorRepository.findProductsByIds(List.of(PRODUCT_A))).isEmpty();
-    }
-
-    @Test
-    void productOfAStopFactorCannotBeDeleted() {
-        jdbcTemplate.update("INSERT INTO stop_factors.stop_factor_product (stop_factor_id, product_id) VALUES (2, ?)", PRODUCT_A);
-
-        assertThat(productUsageChecker.isProductUsed(PRODUCT_A)).isTrue();
-        assertThatThrownBy(() -> productService.delete(PRODUCT_A)).isInstanceOf(ConflictException.class);
-    }
-
-    @Test
-    void productOfASavedCheckCannotBeDeleted() {
-        // only a check refers to the product, no stop factor is limited to it
-        jdbcTemplate.update("""
-                INSERT INTO stop_factors.stop_factor_check (id, scoring_id, stop_factor_id, checked_value, result, product_id)
-                VALUES (nextval('stop_factors.stop_factor_check_id_generator'), -500, 2, '0.0', 'APPROVED', ?)
-                """, PRODUCT_B);
-
-        assertThat(stopFactorRepository.isProductUsed(PRODUCT_B)).isFalse();
-        assertThat(productUsageChecker.isProductUsed(PRODUCT_B)).isTrue();
-        assertThatThrownBy(() -> productService.delete(PRODUCT_B)).isInstanceOf(ConflictException.class);
-    }
-
     private static StopFactorRequest stopFactorRequest(Set<Long> productIds) {
         return new StopFactorRequest(ACTIVE_DISPUTES_METRIC, "Тест: активные споры по продукту", null, null, true,
-                Map.of(), productIds,
+                Map.of(), productIds, null,
                 List.of(new ConditionDto(null, StopFactorStatus.REJECTED, StopFactorValueTypes.INTEGER, "0")),
                 null);
     }

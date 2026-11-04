@@ -22,6 +22,7 @@ import kg.bakai.stopfactor.entity.StopFactorCondition;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import kg.bakai.stopfactor.enums.InternalStatusCode;
+import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
@@ -45,6 +46,8 @@ import java.util.*;
 import static kg.bakai.spr.core.kib.dto.enums.LoanStatus.*;
 import static kg.bakai.spr.core.kib.dto.enums.RoleOfClient.*;
 import static kg.bakai.stopfactor.enums.CalculatorType.*;
+import static kg.bakai.common.enums.ProductSegment.MSB;
+import static kg.bakai.common.enums.ProductSegment.RETAIL;
 import static kg.bakai.stopfactor.enums.StopFactorStatus.*;
 import static kg.bakai.stopfactor.enums.StopFactorValueTypes.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,8 +56,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests of the stop factor check, no database. Stop factors are built the way migration 004 left them:
- * legacy ids 1..34 are version 1 with a metric and params.
+ * Unit tests of the stop factor check, no database. Stop factors are built the way changelog 1.3 left them:
+ * legacy ids 1..34 are version 1 with a metric and params. SPR returns no overdue episodes (null) unless a test
+ * sets them, so overdue stop factors read the legacy counters.
  */
 class StopFactorServiceImplTest {
 
@@ -71,6 +75,7 @@ class StopFactorServiceImplTest {
     private final List<StopFactor> activeStopFactors = new ArrayList<>();
     private final List<StopFactorCondition> conditions = new ArrayList<>();
     private OverdueForStopFactor kibOverdue = overdue(0);
+    private List<CreditHistoryEvents.OverdueEpisode> kibEpisodes = null;
 
     private StopFactorServiceImpl service;
 
@@ -97,6 +102,7 @@ class StopFactorServiceImplTest {
         when(stopFactorRepository.findCurrentActiveWithMetric()).thenReturn(activeStopFactors);
         when(stopFactorRepository.findProductByScoringId(anyLong())).thenReturn(Optional.empty());
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
+        when(kibService.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> kibEpisodes);
         when(conditionRepository.findAllByStopFactor_IdIn(anyCollection())).thenAnswer(invocation -> {
             Collection<Long> stopFactorIds = invocation.getArgument(0);
             return conditions.stream()
@@ -284,7 +290,7 @@ class StopFactorServiceImplTest {
     }
 
     @Nested
-    @DisplayName("New structure: versions, metrics, NO_DATA (after migration 004)")
+    @DisplayName("Versioned stop factors: versions, metrics, NO_DATA")
     class NewStructure {
 
         @Test
@@ -382,6 +388,79 @@ class StopFactorServiceImplTest {
     }
 
     @Nested
+    @DisplayName("Overdue episodes from SPR (KibService.getOverdueEpisodes)")
+    class OverdueEpisodes {
+
+        @Test
+        void episodesAreCountedForAnyPeriodAndRange() {
+            // Retail 2026, months 7..12, 6..10 days: UNDERWRITER > 5, REJECTED > 8 - no legacy counter for it
+            StopFactor bucket = stopFactor(200, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 7, "periodToMonth", 12, "minOverdueDays", 6, "maxOverdueDays", 10));
+            condition(bucket, REJECTED, INTEGER, "8");
+            condition(bucket, UNDERWRITER, INTEGER, "5");
+
+            List<CreditHistoryEvents.OverdueEpisode> counted = List.of(
+                    episode(7, 6), episode(12, 10), episode(9, 8), episode(8, 7), episode(10, 9), episode(11, 6));
+            List<CreditHistoryEvents.OverdueEpisode> notCounted = List.of(
+                    episode(6, 8), episode(13, 8), episode(9, 5), episode(9, 11));
+
+            kibEpisodes = concat(counted.subList(0, 5), notCounted);
+            assertThat(check(new Application()).status()).isEqualTo(APPROVED);
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("5.0");
+
+            kibEpisodes = concat(counted, notCounted);
+            assertThat(check(new Application()).status()).isEqualTo(UNDERWRITER);
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("6.0");
+        }
+
+        @Test
+        void episodesReplaceTheLegacyCounters() {
+            // legacy stop factor 27 reads "months 1-3, overdue 1-15" from the counters; with episodes it counts them
+            StopFactor bucket = stopFactor(27, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 10));
+            condition(bucket, REJECTED, INTEGER, "0");
+            kibOverdue = overdue(10);
+            kibEpisodes = List.of();
+
+            assertThat(check(new Application()).status()).isEqualTo(APPROVED);
+            verify(kibService).getOverdueEpisodes(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
+        }
+
+        @Test
+        void withoutKibReportEveryOverdueCountIsZero() {
+            // no credit history: 0 like the legacy counters, also for a range without a legacy counter
+            StopFactor bucket = stopFactor(201, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 11, "maxOverdueDays", 20));
+            condition(bucket, REJECTED, INTEGER, "0");
+
+            assertThat(check(new Application().withoutKib())).isEqualTo(new StopFactorDecision(APPROVED, null));
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("0.0");
+        }
+
+        @Test
+        void sprWithoutEpisodesSendsANewRangeToTheUnderwriter() {
+            StopFactor bucket = stopFactor(201, OVERDUE_BUCKET_COUNT,
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 11, "maxOverdueDays", 20));
+            condition(bucket, REJECTED, INTEGER, "0");
+            kibEpisodes = null;
+
+            assertThat(check(new Application())).isEqualTo(new StopFactorDecision(UNDERWRITER, null));
+            assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo(StopFactorServiceImpl.NO_DATA);
+        }
+
+        private static CreditHistoryEvents.OverdueEpisode episode(int monthsAgo, int maxOverdueDays) {
+            return new CreditHistoryEvents.OverdueEpisode(monthsAgo, maxOverdueDays);
+        }
+
+        private static List<CreditHistoryEvents.OverdueEpisode> concat(List<CreditHistoryEvents.OverdueEpisode> a,
+                                                                       List<CreditHistoryEvents.OverdueEpisode> b) {
+            List<CreditHistoryEvents.OverdueEpisode> all = new ArrayList<>(a);
+            all.addAll(b);
+            return all;
+        }
+    }
+
+    @Nested
     @DisplayName("Products (public.scoring -> public.product)")
     class Products {
 
@@ -397,7 +476,7 @@ class StopFactorServiceImplTest {
 
         @Test
         void stopFactorLimitedToAnotherProductIsSkipped() {
-            ProductProjection product = productProjection(7L);
+            ProductProjection product = productProjection(7L, RETAIL);
             when(stopFactorRepository.findProductByScoringId(SCORING_ID)).thenReturn(Optional.of(product));
             stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of()).getProductIds().add(5L);
             stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of()).getProductIds().add(7L);
@@ -409,10 +488,66 @@ class StopFactorServiceImplTest {
             assertThat(savedChecks()).allMatch(c -> c.getProductId() == 7L);
         }
 
-        private ProductProjection productProjection(long id) {
+        @Test
+        void stopFactorOfAnotherSegmentIsSkipped() {
+            ProductProjection product = productProjection(7L, MSB);
+            when(stopFactorRepository.findProductByScoringId(SCORING_ID)).thenReturn(Optional.of(product));
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of()).setSegment(RETAIL);
+            stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of()).setSegment(MSB);
+            stopFactor(4, KIB_ACTIVE_DISPUTES, Map.of());   // no segment = every segment
+
+            check(new Application());
+
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(3L, 4L);
+        }
+
+        @Test
+        void scoringWithoutProductGetsTheDefaultSegment() {
+            stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of()).setSegment(RETAIL);
+            stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of()).setSegment(MSB);
+
+            check(new Application());
+
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(2L);
+        }
+
+        @Test
+        void segmentAndProductLimitsMustBothMatch() {
+            ProductProjection product = productProjection(7L, MSB);
+            when(stopFactorRepository.findProductByScoringId(SCORING_ID)).thenReturn(Optional.of(product));
+            StopFactor otherProduct = stopFactor(2, KIB_ACTIVE_DISPUTES, Map.of());
+            otherProduct.setSegment(MSB);
+            otherProduct.getProductIds().add(9L);
+            StopFactor sameProduct = stopFactor(3, KIB_UNJUSTIFIED_DISPUTES, Map.of());
+            sameProduct.setSegment(MSB);
+            sameProduct.getProductIds().add(7L);
+
+            check(new Application());
+
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(3L);
+        }
+
+        @Test
+        void segmentIsReadFromTheProductRow() {
+            assertThat(productRow("MSB").getSegment()).isEqualTo(MSB);
+            assertThat(productRow("RETAIL").getSegment()).isEqualTo(RETAIL);
+            assertThat(productRow(null).getSegment()).isEqualTo(ProductSegment.DEFAULT);
+        }
+
+        private ProductProjection productProjection(long id, ProductSegment segment) {
             ProductProjection projection = mock(ProductProjection.class);
             when(projection.getId()).thenReturn(id);
+            when(projection.getSegment()).thenReturn(segment);
             return projection;
+        }
+
+        private static ProductProjection productRow(String segmentType) {
+            return new ProductProjection() {
+                public Long getId() { return 1L; }
+                public String getName() { return "Продукт"; }
+                public String getDescription() { return "Описание"; }
+                public String getSegmentType() { return segmentType; }
+            };
         }
     }
 
@@ -430,7 +565,7 @@ class StopFactorServiceImplTest {
             service.save("Количество активных споров КИБ", "описание");
 
             verify(consoleService).create(new StopFactorRequest(2L, "Количество активных споров КИБ", "описание",
-                    null, true, Map.of(), Set.of(), List.of(), null), StopFactorServiceImpl.SPR_USER);
+                    null, true, Map.of(), Set.of(), null, List.of(), null), StopFactorServiceImpl.SPR_USER);
         }
 
         @Test
@@ -444,7 +579,7 @@ class StopFactorServiceImplTest {
         @Test
         void saveConditionCreatesANewVersionReplacingTheConditionWithTheSameResult() {
             StopFactorResponse current = new StopFactorResponse(9, 9, 1, true, "Текущее количество дней просрочки", null,
-                    true, 9, 6, "Текущие дни просрочки", CURRENT_OVERDUE_DAYS, Map.of(), Set.of(5L),
+                    true, 9, 6, "Текущие дни просрочки", CURRENT_OVERDUE_DAYS, Map.of(), Set.of(5L), MSB,
                     List.of(new ConditionDto(11L, REJECTED, INTEGER, "0"), new ConditionDto(12L, UNDERWRITER, INTEGER, "-1")),
                     null, null, null, null, null);
             when(consoleService.get(9)).thenReturn(current);
@@ -459,6 +594,7 @@ class StopFactorServiceImplTest {
             assertThat(request.getValue().metricId()).isEqualTo(6L);
             assertThat(request.getValue().name()).isEqualTo("Текущее количество дней просрочки");
             assertThat(request.getValue().productIds()).containsExactly(5L);
+            assertThat(request.getValue().segment()).isEqualTo(MSB);
             assertThat(request.getValue().changeReason()).isNotBlank();
         }
 
@@ -475,7 +611,7 @@ class StopFactorServiceImplTest {
     // Fixtures
     // ------------------------------------------------------------------------------------------------
 
-    /** Version 1 (legacy id or a new stop factor), as migration 004 leaves it. */
+    /** Version 1 (legacy id or a new stop factor), as changelog 1.3 leaves it. */
     private StopFactor stopFactor(long id, CalculatorType calculator, Map<String, Object> params) {
         StopFactorMetric metric = new StopFactorMetric();
         metric.setCalculator(calculator);

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import kg.bakai.common.enums.ProductSegment;
 
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ public record StopFactorRequest(
         Boolean active,
         Map<String, Object> params,
         Set<@NotNull Long> productIds,
+        ProductSegment segment,
         @NotEmpty List<@NotNull @Valid ConditionDto> conditions,
         @Size(max = 255) String changeReason
 ) {

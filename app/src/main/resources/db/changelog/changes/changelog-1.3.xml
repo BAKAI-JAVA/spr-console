@@ -6,9 +6,8 @@
         https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <!--
-        Makes stop factors manageable:
-          * stop_factor_product - limits a stop factor to credit products of SPR (public.product, owned by SPR:
-                                 this changelog does not create it, locally see spr-dummy-tables.xml)
+        1.3 - makes stop factors manageable:
+          * stop_factor_product - limits a stop factor to credit products (public.product, see changelog-1.1)
           * stop_factor_metric - what is measured (calculator) and which params it takes
           * stop_factor        - becomes versioned (root_id/version_number/valid_from/valid_to),
                                  points to a metric and stores its params
@@ -16,7 +15,7 @@
         so stop_factor_condition and stop_factor_check rows stay valid without changes.
     -->
 
-    <changeSet id="004-create-stop-factor-metric" author="stop-factor">
+    <changeSet id="1.3.0" author="aaltynbek">
         <createTable schemaName="stop_factors" tableName="stop_factor_metric">
             <column name="id" type="BIGINT">
                 <constraints primaryKey="true" nullable="false"/>
@@ -55,7 +54,7 @@
         </rollback>
     </changeSet>
 
-    <changeSet id="004-seed-stop-factor-metric" author="stop-factor">
+    <changeSet id="1.3.1" author="aaltynbek">
         <sql>
             INSERT INTO stop_factors.stop_factor_metric (id, created_date, title, calculator, name_template, params) VALUES
             (1, now(), 'Отказные статусы в КИБ', 'KIB_REFUSAL_STATUSES',
@@ -96,7 +95,7 @@
         </rollback>
     </changeSet>
 
-    <changeSet id="004-add-stop-factor-versioning-columns" author="stop-factor">
+    <changeSet id="1.3.2" author="aaltynbek">
         <addColumn schemaName="stop_factors" tableName="stop_factor">
             <column name="root_id" type="BIGINT">
                 <constraints foreignKeyName="fk_stop_factor_root"
@@ -128,7 +127,7 @@
         If the database holds a stop factor that is not listed here, the NOT NULL step below fails
         and the whole migration stops instead of leaving a stop factor without a metric.
     -->
-    <changeSet id="004-backfill-stop-factor" author="stop-factor">
+    <changeSet id="1.3.3" author="aaltynbek">
         <sql>
             UPDATE stop_factors.stop_factor
             SET valid_from = COALESCE(created_date, now()),
@@ -190,7 +189,7 @@
           * one current version (valid_to IS NULL) per stop factor, also under concurrent admin edits
           * version numbers are unique per stop factor
     -->
-    <changeSet id="004-stop-factor-version-constraints" author="stop-factor">
+    <changeSet id="1.3.4" author="aaltynbek">
         <sql>
             ALTER TABLE stop_factors.stop_factor
                 ADD CONSTRAINT ck_stop_factor_version_number CHECK (version_number >= 1),
@@ -221,7 +220,7 @@
         </rollback>
     </changeSet>
 
-    <changeSet id="004-create-stop-factor-product" author="stop-factor">
+    <changeSet id="1.3.5" author="aaltynbek">
         <createTable schemaName="stop_factors" tableName="stop_factor_product">
             <column name="stop_factor_id" type="BIGINT">
                 <constraints nullable="false"
@@ -245,7 +244,7 @@
         </createIndex>
     </changeSet>
 
-    <changeSet id="004-add-stop-factor-check-product" author="stop-factor">
+    <changeSet id="1.3.6" author="aaltynbek">
         <addColumn schemaName="stop_factors" tableName="stop_factor_check">
             <column name="product_id" type="BIGINT">
                 <constraints foreignKeyName="fk_stop_factor_check_product"
@@ -257,7 +256,7 @@
     </changeSet>
 
     <!-- Version history lookups: which checks used a given stop factor version -->
-    <changeSet id="004-stop-factor-check-stop-factor-index" author="stop-factor">
+    <changeSet id="1.3.7" author="aaltynbek">
         <createIndex schemaName="stop_factors" tableName="stop_factor_check" indexName="idx_stop_factor_check_stop_factor_id">
             <column name="stop_factor_id"/>
         </createIndex>

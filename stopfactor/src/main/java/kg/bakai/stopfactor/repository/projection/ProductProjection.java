@@ -1,5 +1,7 @@
 package kg.bakai.stopfactor.repository.projection;
 
+import kg.bakai.common.enums.ProductSegment;
+
 /**
  * Credit product of SPR (table public.product). Read with a native query: the product table belongs to SPR,
  * the stop factor module does not map it as its own entity.
@@ -10,4 +12,11 @@ public interface ProductProjection {
     String getName();
 
     String getDescription();
+
+    /** Column public.product.segment_type, RETAIL or MSB. */
+    String getSegmentType();
+
+    default ProductSegment getSegment() {
+        return getSegmentType() != null ? ProductSegment.valueOf(getSegmentType()) : ProductSegment.DEFAULT;
+    }
 }

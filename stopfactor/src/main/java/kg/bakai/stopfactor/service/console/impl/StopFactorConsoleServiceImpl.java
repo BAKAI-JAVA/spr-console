@@ -6,12 +6,14 @@ import kg.bakai.stopfactor.dto.console.StopFactorResponse;
 import kg.bakai.stopfactor.entity.StopFactor;
 import kg.bakai.stopfactor.entity.StopFactorCondition;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
+import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.stopfactor.evaluation.NameTemplateRenderer;
 import kg.bakai.common.exception.BusinessValidationException;
 import kg.bakai.common.exception.NotFoundException;
 import kg.bakai.stopfactor.repository.StopFactorConditionRepository;
 import kg.bakai.stopfactor.repository.StopFactorMetricRepository;
 import kg.bakai.stopfactor.repository.StopFactorRepository;
+import kg.bakai.stopfactor.repository.projection.ProductProjection;
 import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,11 +38,15 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<StopFactorResponse> getAll(Boolean active, Long metricId, Long productId) {
+    public List<StopFactorResponse> getAll(Boolean active, Long metricId, Long productId, ProductSegment segment) {
+        // a product that does not exist gets no stop factors with a segment or a product limit
+        ProductSegment productSegment = productId == null ? null : stopFactorRepository.findProductsByIds(List.of(productId)).stream()
+                .findFirst().map(ProductProjection::getSegment).orElse(null);
         List<StopFactor> stopFactors = stopFactorRepository.findAllCurrentWithMetric().stream()
                 .filter(sf -> active == null || sf.isActive() == active)
                 .filter(sf -> metricId == null || sf.getMetric().getId().equals(metricId))
-                .filter(sf -> productId == null || sf.getProductIds().isEmpty() || sf.getProductIds().contains(productId))
+                .filter(sf -> productId == null || sf.appliesTo(productId, productSegment))
+                .filter(sf -> segment == null || sf.getSegment() == null || sf.getSegment() == segment)
                 .toList();
         return toResponses(stopFactors);
     }
@@ -71,24 +77,22 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         if (!metric.isActive()) {
             errors.add("metricId: метрика '" + metric.getTitle() + "' неактивна");
         }
-        Map<String, Object> params = validator.validateParams(metric, request.params(), errors);
-        List<ConditionDto> conditions = validator.validateConditions(metric, request.conditions(), errors);
-        Set<Long> productIds = request.productIds() != null ? request.productIds() : Set.of();
-        validator.validateProducts(productIds, errors);
+        Definition definition = validateDefinition(metric, request, errors);
         if (!errors.isEmpty()) {
             throw new BusinessValidationException(errors);
         }
 
         StopFactor stopFactor = new StopFactor();
         stopFactor.setMetric(metric);
-        stopFactor.setParams(new HashMap<>(params));
-        stopFactor.setName(resolveName(request.name(), metric, params));
+        stopFactor.setParams(new HashMap<>(definition.params()));
+        stopFactor.setName(resolveName(request.name(), metric, definition.params()));
         stopFactor.setDescription(blankToNull(request.description()));
         stopFactor.setActive(request.active() == null || request.active());
         stopFactor.setOrderNumber(request.orderNumber() != null
                 ? request.orderNumber()
                 : stopFactorRepository.findMaxCurrentOrderNumber() + 1);
-        stopFactor.setProductIds(new HashSet<>(productIds));
+        stopFactor.setProductIds(new HashSet<>(definition.productIds()));
+        stopFactor.setSegment(request.segment());
         stopFactor.setValidFrom(LocalDateTime.now());
         stopFactor.setChangeReason(request.changeReason() != null && !request.changeReason().isBlank()
                 ? request.changeReason().trim()
@@ -96,7 +100,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         stopFactor.setCreatedBy(user);
 
         StopFactor saved = stopFactorRepository.save(stopFactor);
-        saveConditions(saved, conditions);
+        saveConditions(saved, definition.conditions());
         log.info("Стоп-фактор {} '{}' создан пользователем {}", saved.getFactorId(), saved.getName(), user);
         return get(saved.getFactorId());
     }
@@ -119,13 +123,13 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         if (active && !current.isActive() && !metric.isActive()) {
             errors.add("active: метрика '" + metric.getTitle() + "' неактивна, активируйте ее перед активацией стоп-фактора");
         }
-        Map<String, Object> params = validator.validateParams(metric, request.params(), errors);
-        List<ConditionDto> conditions = validator.validateConditions(metric, request.conditions(), errors);
-        Set<Long> productIds = request.productIds() != null ? request.productIds() : Set.of();
-        validator.validateProducts(productIds, errors);
+        Definition definition = validateDefinition(metric, request, errors);
         if (!errors.isEmpty()) {
             throw new BusinessValidationException(errors);
         }
+        Map<String, Object> params = definition.params();
+        List<ConditionDto> conditions = definition.conditions();
+        Set<Long> productIds = definition.productIds();
 
         boolean paramsChanged = !params.equals(current.getParams());
         String name = request.name() != null && !request.name().isBlank()
@@ -140,6 +144,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
                 && orderNumber == current.getOrderNumber()
                 && active == current.isActive()
                 && productIds.equals(current.getProductIds())
+                && request.segment() == current.getSegment()
                 && conditionKeys(conditions).equals(conditionKeysOf(currentConditions));
         if (unchanged) {
             log.info("Стоп-фактор {}: изменений от {} нет, новая версия не создана", factorId, user);
@@ -153,6 +158,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         next.setOrderNumber(orderNumber);
         next.setActive(active);
         next.setProductIds(new HashSet<>(productIds));
+        next.setSegment(request.segment());
         StopFactor saved = stopFactorRepository.save(next);
         saveConditions(saved, conditions);
         log.info("Стоп-фактор {} обновлен до версии {} пользователем {}: {}", factorId, saved.getVersionNumber(), user, request.changeReason());
@@ -188,7 +194,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
     @Override
     @Transactional
-    // Порядок не влияет на решение, поэтому меняется на месте, без новой версии
+    // The order does not change any decision, so it is updated in place without a new version
     public List<StopFactorResponse> reorder(List<Long> factorIds) {
         List<StopFactor> currents = stopFactorRepository.findAllCurrentWithMetric();
         Map<Long, StopFactor> byFactorId = currents.stream()
@@ -222,8 +228,20 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         return toResponses(stopFactorRepository.findAllCurrentWithMetric());
     }
 
-    // Текущая версия закрывается и сохраняется (flush) до вставки новой: у стоп-фактора может быть только одна
-    // текущая версия (ux_stop_factor_current_version), а Hibernate выполняет INSERT раньше UPDATE
+    /** Params, conditions and products of a request, normalized; problems are added to errors. */
+    private record Definition(Map<String, Object> params, List<ConditionDto> conditions, Set<Long> productIds) {
+    }
+
+    private Definition validateDefinition(StopFactorMetric metric, StopFactorRequest request, List<String> errors) {
+        Map<String, Object> params = validator.validateParams(metric, request.params(), errors);
+        List<ConditionDto> conditions = validator.validateConditions(metric, request.conditions(), errors);
+        Set<Long> productIds = request.productIds() != null ? request.productIds() : Set.of();
+        validator.validateProducts(productIds, errors);
+        return new Definition(params, conditions, productIds);
+    }
+
+    // The current version is closed and flushed before the next one is inserted: a stop factor has only one
+    // current version (ux_stop_factor_current_version), and Hibernate would run the INSERT before the UPDATE
     private StopFactor closeAndCreateNextVersion(StopFactor current, String changeReason, String user) {
         LocalDateTime now = LocalDateTime.now();
         current.setValidTo(now);
@@ -306,6 +324,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
                 metric.getCalculator(),
                 new TreeMap<>(sf.getParams()),
                 new TreeSet<>(sf.getProductIds()),
+                sf.getSegment(),
                 conditions.stream()
                         .sorted(Comparator.comparing(StopFactorCondition::getResult))
                         .map(c -> new ConditionDto(c.getId(), c.getResult(), c.getValueType(), c.getValue()))

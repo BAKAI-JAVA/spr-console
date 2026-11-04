@@ -1,63 +1,66 @@
-### Active stop factors
-GET http://localhost:9090/api/v1/stop-factors
+######## Test check (LOCAL ONLY, stop-factor.test-check.enabled=true) ########
+# Runs StopFactorService.check with imitated KIB / OB data and saves the results like a real scoring.
+# Scorings 1..5 (changelog 1.2): 1 Потребительский, 2 Автокредит, 3 Ипотека, 4 Микрокредит (RETAIL), 5 Бизнес-кредит (MSB)
 
-### Conditions of a stop factor
-GET http://localhost:9090/api/v1/stop-factors/13/conditions
+### Ready scenarios with their expected decisions
+GET http://localhost:9090/api/v1/test/stop-factor-check/scenarios
 
-### Clean client -> APPROVED (200)
-POST http://localhost:9090/api/v1/stop-factors/check
+### Run a scenario (asExpected shows whether the decision matches)
+POST http://localhost:9090/api/v1/test/stop-factor-check/scenarios/msb-same-history-yellow
+
+### Overdue history: 6 episodes of 5 days in months 1..3 -> Retail REJECTED (try scoringId 5 = MSB -> UNDERWRITER)
+POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
 {
   "scoringId": 1,
-  "creditHistoryStatuses": ["Open", "FullyPaid"],
-  "values": {
-    "numberOfActiveDisputes": 0, "numberOfUnjustifiedDisputesInPast": 0,
-    "numberOfRestructuringsLast12Months": 0, "countOfChangesObLast12Month": 0,
-    "numberOfRestructuringsFrom12To24Months": 0, "countOfChangesObFrom13To24Months": 0,
-    "creditInquiriesLast7Days": 3, "currentNumberOfDaysOverdue": 0, "currentAmountOfOverdue": 0,
-    "totalNumberOfNewOpenLoansInTheLast30Days": 1, "totalOpenCreditContracts": 2,
-    "overdue": {}
+  "kib": {
+    "loans": [ { "role": "MainDebtor", "status": "Open" } ],
+    "overdueEpisodes": [
+      { "monthsAgo": 1, "maxOverdueDays": 5 }, { "monthsAgo": 2, "maxOverdueDays": 5 }, { "monthsAgo": 2, "maxOverdueDays": 3 },
+      { "monthsAgo": 3, "maxOverdueDays": 7 }, { "monthsAgo": 3, "maxOverdueDays": 10 }, { "monthsAgo": 3, "maxOverdueDays": 1 }
+    ]
   }
 }
 
-### Restructuring in 13-24 months + KIB transfer status -> UNDERWRITER (301)
-POST http://localhost:9090/api/v1/stop-factors/check
+### Product relation: 3 open credits by Ипотека -> test stop factor of Ипотека/Автокредит -> UNDERWRITER
+POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
-{
-  "scoringId": 2,
-  "creditHistoryStatuses": ["TransferredToOtherReportingInst"],
-  "values": { "numberOfRestructuringsFrom12To24Months": 1, "overdue": { "countWherePeriodFrom1To3MonthsAndOverdueFrom1To15": 7 } }
-}
+{ "scoringId": 3, "kib": { "openCredits": 3 } }
 
-### Current overdue -> REJECTED (451)
-POST http://localhost:9090/api/v1/stop-factors/check
+### Any scoring linked to a product: productId writes public.scoring
+POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
-{
-  "scoringId": 3,
-  "values": { "currentNumberOfDaysOverdue": 5, "currentAmountOfOverdue": 1200.50 }
-}
+{ "scoringId": -100, "productId": 5, "kib": { "newCreditsLast30Days": 4 } }
+
+### Missing data: no KIB report, only OB (current overdue 5 days -> REJECTED 451)
+POST http://localhost:9090/api/v1/test/stop-factor-check
+Content-Type: application/json
+
+{ "scoringId": 2, "obCredits": [ { "overdueDays": 5, "overdueSum": 1200.50, "lastChangeDate": "2026-10-01" } ] }
+
+### Missing data: partial KIB report (no consolidation) -> the disputes are not checked
+POST http://localhost:9090/api/v1/test/stop-factor-check
+Content-Type: application/json
+
+{ "scoringId": 1, "kib": { "activeDisputes": 2, "missingParts": ["CONSOLIDATION"] } }
+
+### Missing data: SPR could not build the overdue episodes -> new ranges NO_DATA -> UNDERWRITER
+POST http://localhost:9090/api/v1/test/stop-factor-check
+Content-Type: application/json
+
+{ "scoringId": 1, "kib": { "episodesUnavailable": true } }
+
+### Missing data: scoring without product -> RETAIL, product limits ignored
+POST http://localhost:9090/api/v1/test/stop-factor-check
+Content-Type: application/json
+
+{ "kib": {} }
 
 ### Saved results of a scoring
-GET http://localhost:9090/api/v1/stop-factors/checks/3
-
-### Same check with the new optional fields: product + raw credit history
-POST http://localhost:9090/api/v1/stop-factors/check
-Content-Type: application/json
-
-{
-  "scoringId": 4,
-  "productId": 1,
-  "values": { "totalOpenCreditContracts": 2 },
-  "history": {
-    "overdueEpisodes": [ { "monthsAgo": 2, "maxOverdueDays": 12 }, { "monthsAgo": 14, "maxOverdueDays": 35 } ],
-    "restructurings": [ { "source": "KIB", "monthsAgo": 15 } ],
-    "bureauRequestsDaysAgo": [0, 1, 6],
-    "newCreditsDaysAgo": [10]
-  }
-}
+GET http://localhost:9090/api/v1/stop-factors/checks/1
 
 ######## Admin API ########
 
@@ -73,17 +76,17 @@ Content-Type: application/json
 
 { "title": "Запросы в КИБ за период", "calculator": "BUREAU_REQUESTS_COUNT", "nameTemplate": "Запросы в кредитное бюро за {days} дней" }
 
-### Products
+### Products (read only, managed by SPR)
 GET http://localhost:9090/api/v1/admin/products
 
-###
-POST http://localhost:9090/api/v1/admin/products
-Content-Type: application/json
+### One product with its segment
+GET http://localhost:9090/api/v1/admin/products/5
 
-{ "name": "Потребительский", "description": "Потребительский кредит" }
-
-### Current stop factors (filters: active, metricId, productId)
+### Current stop factors (filters: active, metricId, productId, segment)
 GET http://localhost:9090/api/v1/admin/stop-factors?active=true
+
+### Stop factors of the MSB segment, including the common ones
+GET http://localhost:9090/api/v1/admin/stop-factors?active=true&segment=MSB
 
 ### One stop factor / its version history
 GET http://localhost:9090/api/v1/admin/stop-factors/27
@@ -100,6 +103,7 @@ X-User: admin
   "metricId": 10,
   "params": { "periodFromMonth": 1, "periodToMonth": 6, "minOverdueDays": 30 },
   "productIds": [1],
+  "segment": "RETAIL",
   "conditions": [ { "result": "REJECTED", "valueType": "INTEGER", "value": "0" } ],
   "changeReason": "Новое правило кредитного комитета"
 }

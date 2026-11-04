@@ -26,11 +26,11 @@ class OverdueBucketCountCalculatorTest {
     private static StopFactorCheckRequest legacy(OverdueForStopFactor overdue) {
         StopFactorIntegerValueDto zero = new StopFactorIntegerValueDto(0, 0);
         StopFactorIntegerValueDto values = new StopFactorIntegerValueDto(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue);
-        return new StopFactorCheckRequest(1L, null, null, overdue != null ? values : zero, null);
+        return new StopFactorCheckRequest(1L, null, overdue != null ? values : zero, null);
     }
 
     private static StopFactorCheckRequest raw(List<CreditHistoryEvents.OverdueEpisode> episodes) {
-        return new StopFactorCheckRequest(1L, null, null, new StopFactorIntegerValueDto(0, 0),
+        return new StopFactorCheckRequest(1L, null, new StopFactorIntegerValueDto(0, 0),
                 new CreditHistoryEvents(episodes, null, null, null));
     }
 
@@ -62,7 +62,7 @@ class OverdueBucketCountCalculatorTest {
     @Test
     void rawHistoryTakesPrecedenceOverLegacyValues() {
         OverdueForStopFactor overdue = new OverdueForStopFactor(9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        StopFactorCheckRequest request = new StopFactorCheckRequest(1L, null, null,
+        StopFactorCheckRequest request = new StopFactorCheckRequest(1L, null,
                 new StopFactorIntegerValueDto(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue),
                 new CreditHistoryEvents(List.of(), null, null, null));
 

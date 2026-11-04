@@ -1,15 +1,17 @@
 package kg.bakai.stopfactor.dto.scoring;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
-
-import java.util.List;
-
+/**
+ * What a stop factor calculator reads for one application.
+ *
+ * @param scoringId scoring being checked
+ * @param productId its product, null if the scoring has none
+ * @param values    values of the KIB / OB reports, the legacy source of every calculator
+ * @param history   raw credit history events; a calculator uses a list of it when the list is not null
+ */
 public record StopFactorCheckRequest(
-        @NotNull Long scoringId,
+        long scoringId,
         Long productId,
-        List<String> creditHistoryStatuses,
-        @NotNull @Valid StopFactorIntegerValueDto values,
-        @Valid CreditHistoryEvents history
+        StopFactorIntegerValueDto values,
+        CreditHistoryEvents history
 ) {
 }

@@ -180,7 +180,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
                 .toList();
     }
 
-    // Сравнение в Java: при локали C базы данных lower() в PostgreSQL не меняет кириллицу
+    // Compared in Java: with the C locale of the database, PostgreSQL lower() does not change Cyrillic letters
     private void requireUniqueTitle(String title, Long exceptId) {
         boolean taken = metricRepository.findAll().stream()
                 .anyMatch(m -> !m.getId().equals(exceptId) && m.getTitle().equalsIgnoreCase(title));

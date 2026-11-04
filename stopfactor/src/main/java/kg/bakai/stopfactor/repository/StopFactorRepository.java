@@ -44,8 +44,8 @@ public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
             """)
     Optional<StopFactor> findCurrent(long factorId);
 
-    // Все изменения стоп-фактора сначала блокируют его первую версию, поэтому параллельные правки выполняются по очереди.
-    // Блокируется первая версия, а не текущая: текущая перестает подходить под valid_to is null после коммита правки
+    // Every change of a stop factor first locks its first version, so concurrent edits run one after another.
+    // The first version is locked, not the current one: the current one stops matching valid_to is null once an edit commits
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select sf from StopFactor sf where sf.id = :factorId and sf.rootId is null")
     Optional<StopFactor> lockFactor(long factorId);
@@ -65,11 +65,11 @@ public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
 
     /**
      * Product of the application being scored. Empty if the scoring has no product (legacy scorings) -
-     * then every active stop factor is checked, like before product limits existed.
-     * Tables of SPR in the public schema: scoring(id, product_id), product(id, name, description).
+     * then product limits are ignored, like before they existed, and the default segment is used.
+     * Tables of SPR in the public schema: scoring(id, product_id), product(id, name, description, segment_type).
      */
     @Query(value = """
-            SELECT p.id AS id, p.name AS name, p.description AS description
+            SELECT p.id AS id, p.name AS name, p.description AS description, p.segment_type AS segmentType
             FROM public.scoring s
             JOIN public.product p ON p.id = s.product_id
             WHERE s.id = :scoringId
@@ -80,15 +80,11 @@ public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
      * Products of public.product (SPR) with these ids; ids without a product are not returned.
      */
     @Query(value = """
-            SELECT p.id AS id, p.name AS name, p.description AS description
+            SELECT p.id AS id, p.name AS name, p.description AS description, p.segment_type AS segmentType
             FROM public.product p
             WHERE p.id IN (:productIds)
             """, nativeQuery = true)
     List<ProductProjection> findProductsByIds(Collection<Long> productIds);
-
-    @Query(value = "SELECT EXISTS (SELECT 1 FROM stop_factors.stop_factor_product WHERE product_id = :productId)",
-            nativeQuery = true)
-    boolean isProductUsed(long productId);
 
     @Query(value = "SELECT COALESCE(MAX(order_number), 0) FROM stop_factors.stop_factor WHERE valid_to IS NULL",
             nativeQuery = true)

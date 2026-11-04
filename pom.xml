@@ -21,15 +21,16 @@
             app ──► core-console ──► stopfactor  ──► common
                          └─────────► core-online ──► common
 
-        common       - base entity, exceptions, REST error handling
-        core-online  - credit products (packages kg.bakai.product.*), table public.product.
-                       Must NOT import stopfactor classes. Before deleting a product it asks
-                       ProductUsageChecker, implemented in core-console
-        stopfactor   - stop factor domain and the check used by SPR (StopFactorService).
+        common       - base entity, ProductSegment, exceptions, REST error handling
+        core-online  - credit products of SPR (kg.bakai.product.*, table public.product), read only.
+                       Must NOT import stopfactor classes
+        stopfactor   - stop factor domain and the check used by SPR (StopFactorService), the local test
+                       check endpoint (kg.bakai.stopfactor.testcheck) and dummies of the SPR classes it
+                       reads (kg.bakai.spr.*, not copied to SPR).
                        Must NOT import core-online classes: products are read from public.product with
                        native queries of StopFactorRepository as ProductProjection
         core-console - console REST API (/api/v1/admin/**); the only module that sees both
-                       stopfactor and core-online (StopFactorProductUsageChecker)
+                       stopfactor and core-online
         app          - Spring Boot entry point, configuration, Liquibase changelogs
     -->
     <modules>

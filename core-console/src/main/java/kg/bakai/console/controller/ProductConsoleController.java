@@ -1,17 +1,18 @@
 package kg.bakai.console.controller;
 
-import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 import kg.bakai.product.dto.ProductDto;
 import kg.bakai.product.service.ProductService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@Tag(name = "Console: products", description = "Credit products stop factors can be limited to")
+@Tag(name = "Console: products", description = "Credit products, read only (managed by SPR). segmentType (RETAIL / MSB) "
+        + "decides which segment stop factors check their applications")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/products")
@@ -27,23 +28,5 @@ public class ProductConsoleController {
     @GetMapping("/{id}")
     public ProductDto get(@PathVariable long id) {
         return productService.get(id);
-    }
-
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public ProductDto create(@Valid @RequestBody ProductDto request) {
-        return productService.create(request);
-    }
-
-    @PutMapping("/{id}")
-    public ProductDto update(@PathVariable long id, @Valid @RequestBody ProductDto request) {
-        return productService.update(id, request);
-    }
-
-    @Operation(summary = "Delete a product", description = "Only possible while no stop factor version or check refers to it")
-    @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable long id) {
-        productService.delete(id);
     }
 }

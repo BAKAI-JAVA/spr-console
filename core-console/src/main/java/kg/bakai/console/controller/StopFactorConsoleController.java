@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import kg.bakai.stopfactor.dto.console.StopFactorRequest;
 import kg.bakai.stopfactor.dto.console.StopFactorResponse;
+import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,9 +30,12 @@ public class StopFactorConsoleController {
     public List<StopFactorResponse> getAll(
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) Long metricId,
-            @Parameter(description = "Stop factors that apply to this product, including the ones without product limits")
-            @RequestParam(required = false) Long productId) {
-        return stopFactorConsoleService.getAll(active, metricId, productId);
+            @Parameter(description = "Stop factors that check applications of this product: of its segment or without one, "
+                    + "limited to it or without product limits")
+            @RequestParam(required = false) Long productId,
+            @Parameter(description = "Stop factors of this segment, including the ones without a segment")
+            @RequestParam(required = false) ProductSegment segment) {
+        return stopFactorConsoleService.getAll(active, metricId, productId, segment);
     }
 
     @GetMapping("/{factorId}")

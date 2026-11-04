@@ -22,8 +22,8 @@ public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator {
     private record Bucket(int periodFrom, int periodTo, int minOverdue, Integer maxOverdue) {
     }
 
-    // Поля OverdueForStopFactor по параметрам исходных стоп-факторов. Названия полей не совпадают с диапазонами,
-    // соответствие сохраняет прежний результат проверки для исходных стоп-факторов
+    // Legacy counter read by each original stop factor's params. The field names do not match the ranges:
+    // this mapping keeps the results the original stop factors always had
     private static final Map<Bucket, ToIntFunction<OverdueForStopFactor>> LEGACY_FIELDS = Map.ofEntries(
             Map.entry(new Bucket(1, 3, 1, 10), OverdueForStopFactor::countWherePeriodFrom1To3MonthsAndOverdueFrom1To15),
             Map.entry(new Bucket(1, 3, 11, 15), OverdueForStopFactor::countWherePeriodFrom1To3MonthsAndOverdueFrom16To30),
