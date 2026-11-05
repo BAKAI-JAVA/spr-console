@@ -1,6 +1,6 @@
 package kg.bakai.stopfactor.dto.scoring;
 
-public record StopFactorIntegerValueDto(
+public record ReportValues(
         double numberOfActiveDisputes,
         double numberOfUnjustifiedDisputesInPast,
         double numberOfRestructuringsLast12Months,
@@ -15,7 +15,7 @@ public record StopFactorIntegerValueDto(
         OverdueForStopFactor overdue
 ) {
     /** Values without a KIB report: only the current overdue from OB is known, everything else is 0. */
-    public StopFactorIntegerValueDto(double currentNumberOfDaysOverdue, double currentAmountOfOverdue) {
+    public ReportValues(double currentNumberOfDaysOverdue, double currentAmountOfOverdue) {
         this(0, 0, 0, 0, 0, 0, 0, currentNumberOfDaysOverdue, currentAmountOfOverdue, 0, 0, OverdueForStopFactor.NONE);
     }
 }

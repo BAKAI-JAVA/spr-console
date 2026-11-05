@@ -23,6 +23,27 @@ Content-Type: application/json
   }
 }
 
+### Raw KIB payment calendars -> KibOverdueEpisodeCalculator builds the episodes (as in SPR)
+# MainDebtor: 4 -> 12 days, paid -> 1 episode, max 12, month 1 (OK). Guarantor: 25 days 5 months ago -> REJECTED.
+# CoDebtor contracts are not counted.
+POST http://localhost:9090/api/v1/test/stop-factor-check
+Content-Type: application/json
+
+{
+  "scoringId": -300,
+  "productId": 1,
+  "requestDate": "2026-11-04",
+  "kib": {
+    "contracts": [
+      { "role": "MainDebtor", "calendar": [
+          { "date": "2026-09-10", "pastDueDays": 4 }, { "date": "2026-10-10", "pastDueDays": 12 }, { "date": "2026-11-01", "pastDueDays": 0 } ] },
+      { "role": "Guarantor", "calendar": [
+          { "date": "2026-06-15", "pastDueDays": 25 }, { "date": "2026-07-15", "pastDueDays": 0 } ] },
+      { "role": "CoDebtor", "calendar": [ { "date": "2026-10-01", "pastDueDays": 40 } ] }
+    ]
+  }
+}
+
 ### Product relation: 3 open credits by Ипотека -> test stop factor of Ипотека/Автокредит -> UNDERWRITER
 POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json

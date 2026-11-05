@@ -32,8 +32,11 @@ public record TestCheckRequest(
 ) {
 
     /**
-     * @param overdueEpisodes     continuous overdue episodes SPR builds from the report (KibService.getOverdueEpisodes)
-     * @param episodesUnavailable true imitates SPR that could not build the episodes (returns null)
+     * @param overdueEpisodes     shortcut for the overdue history: each episode becomes a contract with one payment
+     *                            calendar entry, so KibOverdueEpisodeCalculator returns exactly these episodes
+     * @param contracts           contracts with raw payment calendars, read by KibOverdueEpisodeCalculator as in SPR
+     * @param episodesUnavailable true imitates a report whose contracts have no payment calendars: no episodes can
+     *                            be built
      * @param legacyOverdue       the 17 legacy counters (KibService.getOverdueByPeriodAndCount), zeros when omitted
      * @param missingParts        parts of the KIB report SPR did not receive
      */
@@ -46,10 +49,26 @@ public record TestCheckRequest(
             int openCredits,
             List<Loan> loans,
             List<OverdueEpisode> overdueEpisodes,
+            List<Contract> contracts,
             boolean episodesUnavailable,
             OverdueForStopFactor legacyOverdue,
             Set<KibPart> missingParts
     ) {
+    }
+
+    /**
+     * A KIB contract of the client with its payment calendar.
+     *
+     * @param role MainDebtor when omitted; CoDebtor contracts are not counted
+     */
+    public record Contract(RoleOfClient role, List<CalendarEntry> calendar) {
+    }
+
+    /**
+     * @param date        date of the calendar entry
+     * @param pastDueDays days of overdue at this entry, 0 - no overdue
+     */
+    public record CalendarEntry(LocalDate date, int pastDueDays) {
     }
 
     @Schema(description = "A part of the KIB report: without any of them the check treats the client as having no KIB report")

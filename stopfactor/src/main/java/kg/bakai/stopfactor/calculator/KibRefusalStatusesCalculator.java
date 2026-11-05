@@ -5,11 +5,10 @@ import kg.bakai.stopfactor.enums.CalculatorType;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @Component
-public class KibRefusalStatusesCalculator extends AbstractStopFactorCalculator {
+public class KibRefusalStatusesCalculator extends ParameterlessCalculator {
 
     @Override
     public CalculatorType type() {
@@ -21,17 +20,9 @@ public class KibRefusalStatusesCalculator extends AbstractStopFactorCalculator {
         return ValueKind.LIST;
     }
 
+    /** Statuses of the KIB loans of the client; the condition of the stop factor lists the refusal ones. */
     @Override
-    public List<ParamSpec> paramSpecs() {
-        return List.of();
-    }
-
-    /**
-     * The statuses are matched by the stop factor's condition against the loans of the KIB report, the
-     * calculator itself has no value to measure.
-     */
-    @Override
-    public Optional<CheckedValue> calculate(Map<String, Object> params, StopFactorCheckRequest request) {
-        return Optional.of(CheckedValue.ofValues(List.of()));
+    public Optional<CheckedValue> calculate(NoParams params, StopFactorCheckRequest request) {
+        return Optional.of(CheckedValue.ofValues(request.loanStatuses() != null ? request.loanStatuses() : List.of()));
     }
 }

@@ -73,7 +73,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
     public MetricDto create(MetricDto request) {
         String title = request.title().trim();
         requireUniqueTitle(title, null);
-        StopFactorCalculator calculator = calculatorRegistry.get(request.calculator());
+        StopFactorCalculator<?> calculator = calculatorRegistry.get(request.calculator());
         List<MetricParamSchema> params = request.params() != null
                 ? normalizeSchema(request.params())
                 : calculator.paramSpecs().stream().map(ParamSpec::toSchema).toList();
@@ -99,7 +99,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
         }
         String title = request.title().trim();
         requireUniqueTitle(title, id);
-        StopFactorCalculator calculator = calculatorRegistry.get(metric.getCalculator());
+        StopFactorCalculator<?> calculator = calculatorRegistry.get(metric.getCalculator());
         List<MetricParamSchema> params = request.params() != null ? normalizeSchema(request.params()) : metric.getParams();
         validateDefinition(calculator, request.nameTemplate(), params);
 
@@ -138,7 +138,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
         log.info("Метрика {} '{}' удалена", id, metric.getTitle());
     }
 
-    private void validateDefinition(StopFactorCalculator calculator, String nameTemplate, List<MetricParamSchema> params) {
+    private void validateDefinition(StopFactorCalculator<?> calculator, String nameTemplate, List<MetricParamSchema> params) {
         List<String> errors = new ArrayList<>();
         Map<String, ParamSpec> specs = calculator.paramSpecs().stream()
                 .collect(Collectors.toMap(ParamSpec::key, s -> s));

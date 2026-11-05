@@ -3,7 +3,11 @@ package kg.bakai.stopfactor.calculator;
 import java.math.BigDecimal;
 import java.util.*;
 
-public abstract class AbstractStopFactorCalculator implements StopFactorCalculator {
+/**
+ * Param normalization shared by the calculators: unknown keys, required params, integers and their minimum,
+ * values from a fixed list.
+ */
+public abstract class AbstractStopFactorCalculator<P> implements StopFactorCalculator<P> {
 
     @Override
     public Map<String, Object> normalizeParams(Map<String, Object> params) {

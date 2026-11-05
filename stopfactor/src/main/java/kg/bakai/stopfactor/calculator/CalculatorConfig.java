@@ -1,7 +1,7 @@
 package kg.bakai.stopfactor.calculator;
 
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
-import kg.bakai.stopfactor.dto.scoring.StopFactorIntegerValueDto;
+import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,39 +10,39 @@ import org.springframework.context.annotation.Configuration;
 public class CalculatorConfig {
 
     @Bean
-    StopFactorCalculator kibActiveDisputesCalculator() {
-        return new SimpleValueCalculator(CalculatorType.KIB_ACTIVE_DISPUTES, StopFactorIntegerValueDto::numberOfActiveDisputes);
+    StopFactorCalculator<NoParams> kibActiveDisputesCalculator() {
+        return new SimpleValueCalculator(CalculatorType.KIB_ACTIVE_DISPUTES, ReportValues::numberOfActiveDisputes);
     }
 
     @Bean
-    StopFactorCalculator kibUnjustifiedDisputesCalculator() {
-        return new SimpleValueCalculator(CalculatorType.KIB_UNJUSTIFIED_DISPUTES, StopFactorIntegerValueDto::numberOfUnjustifiedDisputesInPast);
+    StopFactorCalculator<NoParams> kibUnjustifiedDisputesCalculator() {
+        return new SimpleValueCalculator(CalculatorType.KIB_UNJUSTIFIED_DISPUTES, ReportValues::numberOfUnjustifiedDisputesInPast);
     }
 
     @Bean
-    StopFactorCalculator currentOverdueDaysCalculator() {
-        return new SimpleValueCalculator(CalculatorType.CURRENT_OVERDUE_DAYS, StopFactorIntegerValueDto::currentNumberOfDaysOverdue);
+    StopFactorCalculator<NoParams> currentOverdueDaysCalculator() {
+        return new SimpleValueCalculator(CalculatorType.CURRENT_OVERDUE_DAYS, ReportValues::currentNumberOfDaysOverdue);
     }
 
     @Bean
-    StopFactorCalculator currentOverdueAmountCalculator() {
-        return new SimpleValueCalculator(CalculatorType.CURRENT_OVERDUE_AMOUNT, StopFactorIntegerValueDto::currentAmountOfOverdue);
+    StopFactorCalculator<NoParams> currentOverdueAmountCalculator() {
+        return new SimpleValueCalculator(CalculatorType.CURRENT_OVERDUE_AMOUNT, ReportValues::currentAmountOfOverdue);
     }
 
     @Bean
-    StopFactorCalculator openCreditsCountCalculator() {
-        return new SimpleValueCalculator(CalculatorType.OPEN_CREDITS_COUNT, StopFactorIntegerValueDto::totalOpenCreditContracts);
+    StopFactorCalculator<NoParams> openCreditsCountCalculator() {
+        return new SimpleValueCalculator(CalculatorType.OPEN_CREDITS_COUNT, ReportValues::totalOpenCreditContracts);
     }
 
     @Bean
-    StopFactorCalculator bureauRequestsCountCalculator() {
+    StopFactorCalculator<RecentEventsCountCalculator.Period> bureauRequestsCountCalculator() {
         return new RecentEventsCountCalculator(CalculatorType.BUREAU_REQUESTS_COUNT,
-                CreditHistoryEvents::bureauRequestsDaysAgo, 7, StopFactorIntegerValueDto::creditInquiriesLast7Days);
+                CreditHistoryEvents::bureauRequestsDaysAgo, 7, ReportValues::creditInquiriesLast7Days);
     }
 
     @Bean
-    StopFactorCalculator newCreditsCountCalculator() {
+    StopFactorCalculator<RecentEventsCountCalculator.Period> newCreditsCountCalculator() {
         return new RecentEventsCountCalculator(CalculatorType.NEW_CREDITS_COUNT,
-                CreditHistoryEvents::newCreditsDaysAgo, 30, StopFactorIntegerValueDto::totalNumberOfNewOpenLoansInTheLast30Days);
+                CreditHistoryEvents::newCreditsDaysAgo, 30, ReportValues::totalNumberOfNewOpenLoansInTheLast30Days);
     }
 }

@@ -23,28 +23,33 @@ class OverdueBucketCountCalculatorTest {
         return params;
     }
 
+    /** Params as stored, parsed the way the check parses them. */
+    private OverdueBucketCountCalculator.Bucket parsed(int from, int to, int min, Integer max) {
+        return calculator.parseParams(bucket(from, to, min, max));
+    }
+
     private static StopFactorCheckRequest legacy(OverdueForStopFactor overdue) {
-        StopFactorIntegerValueDto zero = new StopFactorIntegerValueDto(0, 0);
-        StopFactorIntegerValueDto values = new StopFactorIntegerValueDto(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue);
-        return new StopFactorCheckRequest(1L, null, overdue != null ? values : zero, null);
+        ReportValues zero = new ReportValues(0, 0);
+        ReportValues values = new ReportValues(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue);
+        return new StopFactorCheckRequest(1L, null, overdue != null ? values : zero, null, List.of());
     }
 
     private static StopFactorCheckRequest raw(List<CreditHistoryEvents.OverdueEpisode> episodes) {
-        return new StopFactorCheckRequest(1L, null, new StopFactorIntegerValueDto(0, 0),
-                new CreditHistoryEvents(episodes, null, null, null));
+        return new StopFactorCheckRequest(1L, null, new ReportValues(0, 0),
+                new CreditHistoryEvents(episodes, null, null, null), List.of());
     }
 
     @Test
     void seededBucketReadsItsLegacyField() {
         OverdueForStopFactor overdue = new OverdueForStopFactor(9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3);
 
-        assertThat(calculator.calculate(bucket(1, 3, 1, 10), legacy(overdue))).contains(CheckedValue.ofNumber(9));
-        assertThat(calculator.calculate(bucket(25, 36, 91, null), legacy(overdue))).contains(CheckedValue.ofNumber(3));
+        assertThat(calculator.calculate(parsed(1, 3, 1, 10), legacy(overdue))).contains(CheckedValue.ofNumber(9));
+        assertThat(calculator.calculate(parsed(25, 36, 91, null), legacy(overdue))).contains(CheckedValue.ofNumber(3));
     }
 
     @Test
     void bucketWithoutLegacyFieldHasNoDataWithoutRawHistory() {
-        assertThat(calculator.calculate(bucket(1, 6, 30, null), legacy(null))).isEqualTo(Optional.empty());
+        assertThat(calculator.calculate(parsed(1, 6, 30, null), legacy(null))).isEqualTo(Optional.empty());
     }
 
     @Test
@@ -55,18 +60,18 @@ class OverdueBucketCountCalculatorTest {
                 new CreditHistoryEvents.OverdueEpisode(4, 5),
                 new CreditHistoryEvents.OverdueEpisode(2, 11));
 
-        assertThat(calculator.calculate(bucket(1, 3, 1, 10), raw(episodes))).contains(CheckedValue.ofNumber(2));
-        assertThat(calculator.calculate(bucket(1, 3, 11, null), raw(episodes))).contains(CheckedValue.ofNumber(1));
+        assertThat(calculator.calculate(parsed(1, 3, 1, 10), raw(episodes))).contains(CheckedValue.ofNumber(2));
+        assertThat(calculator.calculate(parsed(1, 3, 11, null), raw(episodes))).contains(CheckedValue.ofNumber(1));
     }
 
     @Test
     void rawHistoryTakesPrecedenceOverLegacyValues() {
         OverdueForStopFactor overdue = new OverdueForStopFactor(9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         StopFactorCheckRequest request = new StopFactorCheckRequest(1L, null,
-                new StopFactorIntegerValueDto(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue),
-                new CreditHistoryEvents(List.of(), null, null, null));
+                new ReportValues(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, overdue),
+                new CreditHistoryEvents(List.of(), null, null, null), List.of());
 
-        assertThat(calculator.calculate(bucket(1, 3, 1, 10), request)).contains(CheckedValue.ofNumber(0));
+        assertThat(calculator.calculate(parsed(1, 3, 1, 10), request)).contains(CheckedValue.ofNumber(0));
     }
 
     @Test

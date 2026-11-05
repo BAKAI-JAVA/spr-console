@@ -4,8 +4,6 @@ import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.common.exception.BusinessValidationException;
 import kg.bakai.spr.core.kib.dto.ConsolidationDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
-import kg.bakai.spr.core.kib.dto.LoanDto;
-import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
 import kg.bakai.stopfactor.calculator.CalculatorRegistry;
@@ -13,18 +11,16 @@ import kg.bakai.stopfactor.calculator.CheckedValue;
 import kg.bakai.stopfactor.dto.console.ConditionDto;
 import kg.bakai.stopfactor.dto.console.StopFactorRequest;
 import kg.bakai.stopfactor.dto.console.StopFactorResponse;
-import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
 import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
 import kg.bakai.stopfactor.dto.scoring.StopFactorConditionDto;
 import kg.bakai.stopfactor.dto.scoring.StopFactorDecision;
-import kg.bakai.stopfactor.dto.scoring.StopFactorIntegerValueDto;
 import kg.bakai.stopfactor.entity.StopFactor;
 import kg.bakai.stopfactor.entity.StopFactorCheck;
 import kg.bakai.stopfactor.entity.StopFactorCondition;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import kg.bakai.stopfactor.enums.InternalStatusCode;
-import kg.bakai.stopfactor.enums.StopFactorStatus;
+import kg.bakai.stopfactor.evaluation.ConditionEvaluator;
 import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
 import kg.bakai.stopfactor.repository.StopFactorConditionRepository;
 import kg.bakai.stopfactor.repository.StopFactorMetricRepository;
@@ -44,7 +40,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -54,25 +49,15 @@ import static kg.bakai.stopfactor.enums.StopFactorStatus.UNDERWRITER;
 
 /**
  * Stop factor check of SPR, working with the versioned stop factors of changelog 1.3.
- * <p>
- * How an application is checked:
  * <ol>
- *     <li>the KIB / OB reports become values and credit history events ({@link StopFactorValuesInitializer});</li>
- *     <li>the stop factors that apply to the scoring's product are taken: active current versions of its segment
- *     or of every segment, limited to the product or to no product ({@link StopFactor#appliesTo});</li>
- *     <li>for each one its metric calculates the value, then its REJECTED condition is applied, then the
- *     UNDERWRITER condition if it did not reject;</li>
- *     <li>any REJECTED rejects the application (451 if a current overdue stop factor rejected), otherwise any
- *     UNDERWRITER sends it to the underwriter; the results replace earlier ones of the scoring.</li>
+ *     <li>the KIB / OB reports become a request: values, credit history, loan statuses
+ *     ({@link StopFactorValuesInitializer});</li>
+ *     <li>the active stop factors that apply to the scoring's product are taken ({@link StopFactor#appliesTo});</li>
+ *     <li>for each one its calculator measures the value and its conditions decide ({@link ConditionEvaluator});
+ *     a value that cannot be measured is {@link #NO_DATA} and goes to the underwriter;</li>
+ *     <li>any REJECTED rejects (451 if a current overdue stop factor rejected), otherwise any UNDERWRITER sends to
+ *     the underwriter; the results replace earlier ones of the scoring.</li>
  * </ol>
- * Differences from the legacy algorithm, which switched over stop factor ids 1..34:
- * <ul>
- *     <li>the value comes from the stop factor's metric and params, so console edits (new versions, new ids) work;</li>
- *     <li>451 is chosen by the metric (current overdue days / amount), not by ids 9 and 10;</li>
- *     <li>a stop factor whose value cannot be calculated goes to the underwriter as {@link #NO_DATA};</li>
- *     <li>overdue history is counted from the episodes SPR builds (KibService.getOverdueEpisodes), so any period
- *     and overdue days range works; the 17 legacy counters are used only when SPR returns no episodes.</li>
- * </ul>
  * Stop factors 1..34 as migrated give exactly the legacy results (LegacyStopFactorParityTest).
  */
 @Service
@@ -87,13 +72,10 @@ public class StopFactorServiceImpl implements StopFactorService {
     public static final String NO_DATA = "NO_DATA";
 
     /** Checked value of a loan status stop factor when no loan of the client has one of its statuses. */
-    static final String NO_MATCHES = "Нет совпадений";
+    static final String NO_MATCHES = ConditionEvaluator.NO_MATCHES;
 
     /** Author of the versions created through {@link #save} and {@link #saveCondition}. */
     static final String SPR_USER = "spr";
-
-    /** Conditions are applied in this order: an UNDERWRITER condition only matters if REJECTED did not fire. */
-    private static final List<StopFactorStatus> CONDITION_ORDER = List.of(REJECTED, UNDERWRITER);
 
     /** A rejection by these metrics (legacy stop factors 9 and 10) gives code 451. */
     private static final Set<CalculatorType> CURRENT_OVERDUE_CALCULATORS =
@@ -118,22 +100,22 @@ public class StopFactorServiceImpl implements StopFactorService {
             CustomReport customReport, IndividualReport individualReport,
             ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate
     ) {
-        StopFactorIntegerValueDto values = stopFactorValuesInitializer.values(
-                customReport, individualReport, consolidationDto, totalDebt, requestDate);
-        CreditHistoryEvents history = stopFactorValuesInitializer.history(
-                customReport, individualReport, consolidationDto, requestDate);
         Optional<ProductProjection> product = stopFactorRepository.findProductByScoringId(scoringId);
         Long productId = product.map(ProductProjection::getId).orElse(null);
         ProductSegment segment = product.map(ProductProjection::getSegment).orElse(ProductSegment.DEFAULT);
-        StopFactorCheckRequest request = new StopFactorCheckRequest(scoringId, productId, values, history);
+        StopFactorCheckRequest request = new StopFactorCheckRequest(scoringId, productId,
+                stopFactorValuesInitializer.values(customReport, individualReport, consolidationDto, totalDebt, requestDate),
+                stopFactorValuesInitializer.history(customReport, individualReport, consolidationDto, requestDate),
+                stopFactorValuesInitializer.loanStatuses(individualReport));
 
-        List<StopFactor> stopFactors = findApplicable(productId, segment);
-        Map<Long, List<StopFactorCondition>> conditionsByStopFactorId = findConditions(stopFactors);
+        List<StopFactor> stopFactors = stopFactorRepository.findCurrentActiveWithMetric().stream()
+                .filter(stopFactor -> stopFactor.appliesTo(productId, segment))
+                .toList();
+        Map<Long, List<StopFactorCondition>> conditions = findConditions(stopFactors);
 
         List<StopFactorCheck> checks = new ArrayList<>(stopFactors.size());
         for (StopFactor stopFactor : stopFactors) {
-            StopFactorCheck check = checkStopFactor(stopFactor,
-                    conditionsByStopFactorId.getOrDefault(stopFactor.getId(), List.of()), request, individualReport);
+            StopFactorCheck check = checkStopFactor(stopFactor, conditions.getOrDefault(stopFactor.getId(), List.of()), request);
             check.setProductId(productId);
             checks.add(check);
         }
@@ -203,13 +185,6 @@ public class StopFactorServiceImpl implements StopFactorService {
     // Check of one application
     // ================================================================================================
 
-    /** Active current versions with their metric, in display order, that check applications of this product. */
-    private List<StopFactor> findApplicable(Long productId, ProductSegment segment) {
-        return stopFactorRepository.findCurrentActiveWithMetric().stream()
-                .filter(stopFactor -> stopFactor.appliesTo(productId, segment))
-                .toList();
-    }
-
     /** Conditions of all checked stop factors in one query. */
     private Map<Long, List<StopFactorCondition>> findConditions(List<StopFactor> stopFactors) {
         if (stopFactors.isEmpty()) {
@@ -220,130 +195,35 @@ public class StopFactorServiceImpl implements StopFactorService {
                 .collect(Collectors.groupingBy(condition -> condition.getStopFactor().getId()));
     }
 
+    /** The calculator measures the value, the conditions decide. A value that cannot be measured is NO_DATA. */
+    private StopFactorCheck checkStopFactor(StopFactor stopFactor, List<StopFactorCondition> conditions,
+                                            StopFactorCheckRequest request) {
+        Optional<CheckedValue> value = calculatorRegistry.get(stopFactor.getMetric().getCalculator())
+                .bind(stopFactor.getParams())
+                .calculate(request);
+        if (value.isEmpty()) {
+            log.warn("Скоринг {}: нет данных для стоп-фактора {} '{}' ({} {}), заявка направлена андеррайтеру",
+                    request.scoringId(), stopFactor.getFactorId(), stopFactor.getName(),
+                    stopFactor.getMetric().getCalculator(), stopFactor.getParams());
+            StopFactorCheck check = new StopFactorCheck(request.scoringId(), stopFactor, NO_DATA);
+            check.setResult(UNDERWRITER);
+            return check;
+        }
+        ConditionEvaluator.Outcome outcome = ConditionEvaluator.apply(value.get(), conditions);
+        StopFactorCheck check = new StopFactorCheck(request.scoringId(), stopFactor, outcome.checkedValue());
+        check.setResult(outcome.result());
+        return check;
+    }
+
     /** Any REJECTED rejects (451 if a current overdue stop factor rejected), otherwise any UNDERWRITER. */
     private static StopFactorDecision decide(List<StopFactorCheck> checks) {
         boolean rejected = checks.stream().anyMatch(check -> check.getResult() == REJECTED);
         if (rejected) {
-            boolean currentOverdue = checks.stream()
-                    .anyMatch(check -> check.getResult() == REJECTED && isCurrentOverdue(check.getStopFactor()));
+            boolean currentOverdue = checks.stream().anyMatch(check -> check.getResult() == REJECTED
+                    && CURRENT_OVERDUE_CALCULATORS.contains(check.getStopFactor().getMetric().getCalculator()));
             return new StopFactorDecision(REJECTED, currentOverdue ? InternalStatusCode._451 : null);
         }
         boolean underwriter = checks.stream().anyMatch(check -> check.getResult() == UNDERWRITER);
         return new StopFactorDecision(underwriter ? UNDERWRITER : APPROVED, null);
-    }
-
-    private static boolean isCurrentOverdue(StopFactor stopFactor) {
-        return CURRENT_OVERDUE_CALCULATORS.contains(stopFactor.getMetric().getCalculator());
-    }
-
-    /** Result of one stop factor: its REJECTED condition first, the UNDERWRITER condition only if not rejected. */
-    private StopFactorCheck checkStopFactor(StopFactor stopFactor, List<StopFactorCondition> conditions,
-                                            StopFactorCheckRequest request, IndividualReport individualReport) {
-        long scoringId = request.scoringId();
-        OptionalDouble value = calculateValue(stopFactor, request);
-        if (value.isEmpty()) {
-            return noDataCheck(scoringId, stopFactor);
-        }
-
-        StopFactorCheck check = new StopFactorCheck(scoringId, stopFactor, String.valueOf(value.getAsDouble()));
-        for (StopFactorStatus result : CONDITION_ORDER) {
-            if (check.getResult() == REJECTED) {
-                break;
-            }
-            Optional<StopFactorCondition> condition = conditions.stream().filter(c -> c.getResult() == result).findFirst();
-            if (condition.isPresent()) {
-                check = applyCondition(scoringId, stopFactor, condition.get(), value.getAsDouble(), individualReport);
-            }
-        }
-        return check;
-    }
-
-    /**
-     * Value of the stop factor calculated by its metric with its params. A loan status metric has no number:
-     * its condition is applied to the loans of the KIB report, the value is 0 as in legacy.
-     *
-     * @return empty if the reports have no value for these params
-     */
-    private OptionalDouble calculateValue(StopFactor stopFactor, StopFactorCheckRequest request) {
-        Optional<CheckedValue> value = calculatorRegistry.get(stopFactor.getMetric().getCalculator())
-                .calculate(stopFactor.getParams(), request);
-        if (value.isEmpty()) {
-            return OptionalDouble.empty();
-        }
-        return OptionalDouble.of(value.get().isNumber() ? value.get().number() : 0);
-    }
-
-    /** A stop factor that cannot be checked must not silently pass the application. */
-    private static StopFactorCheck noDataCheck(long scoringId, StopFactor stopFactor) {
-        log.warn("Скоринг {}: нет данных для стоп-фактора {} '{}' ({} {}), заявка направлена андеррайтеру",
-                scoringId, stopFactor.getFactorId(), stopFactor.getName(), stopFactor.getMetric().getCalculator(),
-                stopFactor.getParams());
-        StopFactorCheck check = new StopFactorCheck(scoringId, stopFactor, NO_DATA);
-        check.setResult(UNDERWRITER);
-        return check;
-    }
-
-    // ================================================================================================
-    // Conditions
-    // ================================================================================================
-
-    /**
-     * A number condition holds the highest allowed value and fires when the value is greater. A loan status
-     * condition (ARRAY, or STRING for one status) fires when a loan of the client has one of its statuses.
-     */
-    private static StopFactorCheck applyCondition(long scoringId, StopFactor stopFactor, StopFactorCondition condition,
-                                                  double value, IndividualReport individualReport) {
-        return switch (condition.getValueType()) {
-            case ARRAY, STRING -> applyLoanStatusCondition(scoringId, stopFactor, condition, individualReport);
-            case INTEGER -> applyNumberCondition(scoringId, stopFactor, condition, value, Integer.parseInt(condition.getValue()));
-            case DOUBLE -> applyNumberCondition(scoringId, stopFactor, condition, value, Double.parseDouble(condition.getValue()));
-        };
-    }
-
-    private static StopFactorCheck applyNumberCondition(long scoringId, StopFactor stopFactor, StopFactorCondition condition,
-                                                        double value, double highestAllowed) {
-        StopFactorCheck check = new StopFactorCheck(scoringId, stopFactor, String.valueOf(value));
-        if (value > highestAllowed) {
-            check.setResult(condition.getResult());
-        }
-        return check;
-    }
-
-    /** The checked value is the status found, or {@link #NO_MATCHES}. */
-    private static StopFactorCheck applyLoanStatusCondition(long scoringId, StopFactor stopFactor,
-                                                            StopFactorCondition condition, IndividualReport individualReport) {
-        Optional<LoanStatus> found = findLoanStatus(individualReport, parseLoanStatuses(condition.getValue()));
-        StopFactorCheck check = new StopFactorCheck(scoringId, stopFactor, found.map(String::valueOf).orElse(NO_MATCHES));
-        check.setResult(found.isPresent() ? condition.getResult() : APPROVED);
-        return check;
-    }
-
-    /** A status unknown to LoanStatus is skipped with a warning; legacy LoanStatus.valueOf failed the whole check. */
-    private static Set<LoanStatus> parseLoanStatuses(String conditionValue) {
-        Set<LoanStatus> statuses = EnumSet.noneOf(LoanStatus.class);
-        for (String item : conditionValue.split(",")) {
-            String name = item.trim();
-            if (name.isEmpty()) {
-                continue;
-            }
-            try {
-                statuses.add(LoanStatus.valueOf(name));
-            } catch (IllegalArgumentException e) {
-                log.warn("Неизвестный статус кредита '{}' в условии стоп-фактора, пропущен", name);
-            }
-        }
-        return statuses;
-    }
-
-    /** Status of the first loan of the client (main debtor or guarantor) that has one of the statuses. */
-    private static Optional<LoanStatus> findLoanStatus(IndividualReport individualReport, Set<LoanStatus> statuses) {
-        if (individualReport == null) {
-            return Optional.empty();
-        }
-        return individualReport.loanDtoList().stream()
-                .filter(StopFactorValuesInitializer::isMainDebtorOrGuarantor)
-                .map(LoanDto::getLoanStatus)
-                .filter(statuses::contains)
-                .findFirst();
     }
 }

@@ -8,6 +8,11 @@ import kg.bakai.spr.core.kib.dto.IndividualReport;
 import kg.bakai.spr.core.kib.dto.LoanDto;
 import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
 import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
+import kg.bakai.spr.core.kib.dto.response.Contracts;
+import kg.bakai.spr.core.kib.dto.response.Contracts.Contract;
+import kg.bakai.spr.core.kib.dto.response.Contracts.Contract.CalendarItem;
+import kg.bakai.spr.core.kib.dto.response.Contracts.Contract.PaymentCalendarList;
+import kg.bakai.spr.core.kib.dto.response.Contracts.ContractList;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
@@ -81,6 +86,7 @@ public class StopFactorTestCheckService {
             imitated.add("Скоринг " + scoringId + " без продукта: ограничения по продуктам не действуют, сегмент " + segment + " по умолчанию");
         }
 
+        LocalDate requestDate = request.requestDate() != null ? request.requestDate() : LocalDate.now();
         Kib kib = request.kib();
         CustomReport customReport = null;
         IndividualReport individualReport = null;
@@ -90,7 +96,7 @@ public class StopFactorTestCheckService {
         } else {
             Set<KibPart> missing = kib.missingParts() != null ? kib.missingParts() : Set.of();
             if (!missing.contains(KibPart.CUSTOM_REPORT)) {
-                customReport = customReport(kib, imitated);
+                customReport = customReport(kib, requestDate, imitated);
             }
             if (!missing.contains(KibPart.INDIVIDUAL_REPORT)) {
                 individualReport = new IndividualReport(
@@ -114,7 +120,6 @@ public class StopFactorTestCheckService {
             imitated.add("Нет кредитов в отчёте ОБ");
         }
 
-        LocalDate requestDate = request.requestDate() != null ? request.requestDate() : LocalDate.now();
         StopFactorDecision decision = stopFactorService.check(scoringId, customReport, individualReport, consolidation,
                 new TotalDebtFinalResponse(new ArrayList<>(obCredits)), requestDate);
         stopFactorCheckRepository.flush();
@@ -136,17 +141,33 @@ public class StopFactorTestCheckService {
                 checks);
     }
 
-    private static CustomReport customReport(Kib kib, List<String> imitated) {
-        CustomReport report = new CustomReport();
-        report.setOverdue(kib.legacyOverdue());
-        if (kib.episodesUnavailable()) {
-            report.setOverdueEpisodes(null);
-            imitated.add("СПР не построил эпизоды просрочки: правила по просрочкам читают 17 старых счётчиков, "
-                    + "диапазоны без счётчика дают NO_DATA, заявка уходит андеррайтеру");
-        } else {
-            report.setOverdueEpisodes(kib.overdueEpisodes() != null ? kib.overdueEpisodes() : List.of());
+    /**
+     * Contracts of the custom report: the raw ones of the request, plus one contract per requested episode with a
+     * single calendar entry in the episode's month, so the calculator returns exactly that episode.
+     */
+    private static CustomReport customReport(Kib kib, LocalDate requestDate, List<String> imitated) {
+        List<Contract> contracts = new ArrayList<>();
+        if (kib.contracts() != null) {
+            kib.contracts().forEach(c -> contracts.add(contract(c.role(), c.calendar() == null ? List.of() : c.calendar().stream()
+                    .map(e -> new CalendarItem(e.date().atStartOfDay(), e.pastDueDays()))
+                    .toList())));
         }
-        return report;
+        if (kib.overdueEpisodes() != null) {
+            kib.overdueEpisodes().forEach(e -> contracts.add(contract(RoleOfClient.MainDebtor, List.of(new CalendarItem(
+                    requestDate.minusMonths(e.monthsAgo() - 1L).atStartOfDay(), e.maxOverdueDays())))));
+        }
+        if (kib.episodesUnavailable()) {
+            List<Contract> withoutCalendars = contracts.stream().map(c -> contract(c.roleOfClient(), List.of())).toList();
+            contracts.clear();
+            contracts.addAll(withoutCalendars.isEmpty() ? List.of(contract(RoleOfClient.MainDebtor, List.of())) : withoutCalendars);
+            imitated.add("В отчёте КИБ нет платежных календарей: эпизоды просрочки не построены, правила по просрочкам "
+                    + "читают 17 старых счётчиков, диапазоны без счётчика дают NO_DATA, заявка уходит андеррайтеру");
+        }
+        return new CustomReport(new Contracts(new ContractList(contracts)), kib.legacyOverdue());
+    }
+
+    private static Contract contract(RoleOfClient role, List<CalendarItem> calendar) {
+        return new Contract(Objects.requireNonNullElse(role, RoleOfClient.MainDebtor), new PaymentCalendarList(calendar));
     }
 
     private static List<LoanDto> loans(Kib kib) {

@@ -3,6 +3,8 @@ package kg.bakai.stopfactor.testcheck;
 import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
 import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
+import kg.bakai.stopfactor.testcheck.TestCheckRequest.CalendarEntry;
+import kg.bakai.stopfactor.testcheck.TestCheckRequest.Contract;
 import kg.bakai.stopfactor.testcheck.TestCheckRequest.Kib;
 import kg.bakai.stopfactor.testcheck.TestCheckRequest.KibPart;
 import kg.bakai.stopfactor.testcheck.TestCheckRequest.Loan;
@@ -37,7 +39,7 @@ final class TestCheckScenarios {
                             List.of(new Loan(RoleOfClient.MainDebtor, LoanStatus.Open, 0, 0, 0),
                                     new Loan(RoleOfClient.Guarantor, LoanStatus.FullyPaid, 0, 0, 0)),
                             List.of(new OverdueEpisode(2, 5), new OverdueEpisode(14, 12)),
-                            false, null, Set.of()),
+                            null, false, null, Set.of()),
                     List.of(new ObCredit(0, BigDecimal.ZERO, LocalDate.of(2023, 5, 10))))),
             new TestCheckScenario("clean-retail",
                     "Чистая кредитная история, Розница",
@@ -51,6 +53,19 @@ final class TestCheckScenarios {
             new TestCheckScenario("retail-old-overdue-no-limit",
                     "Просрочки 1-5 дней в 7-12 месяце и до 30 дней в 25-36 месяце: без ограничений",
                     APPROVED, null, request(CONSUMER, kib().episodes(List.of(new OverdueEpisode(8, 5), new OverdueEpisode(30, 30))))),
+            new TestCheckScenario("kib-payment-calendars",
+                    "Платежные календари КИБ: просрочка 12 дней месяц назад (Ок), 25 дней 5 месяцев назад у поручителя "
+                            + "(с 4 по 6 месяц от 21 дня - отказ), просрочка созаемщика не учитывается",
+                    REJECTED, null, request(CONSUMER, kib().contracts(List.of(
+                    new Contract(RoleOfClient.MainDebtor, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 9, 10), 4),
+                            new CalendarEntry(LocalDate.of(2026, 10, 10), 12),
+                            new CalendarEntry(LocalDate.of(2026, 11, 1), 0))),
+                    new Contract(RoleOfClient.Guarantor, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 6, 15), 25),
+                            new CalendarEntry(LocalDate.of(2026, 7, 15), 0))),
+                    new Contract(RoleOfClient.CoDebtor, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 10, 1), 40))))))),
             new TestCheckScenario("product-limited-stop-factor",
                     "3 открытых кредита по Ипотеке: тестовый стоп-фактор только для Ипотеки и Автокредита (UNDERWRITER > 2)",
                     UNDERWRITER, null, request(MORTGAGE, kib().openCredits(3))),
@@ -89,7 +104,7 @@ final class TestCheckScenarios {
                     "Тот же клиент с полным отчётом КИБ: 2 активных спора - отказ",
                     REJECTED, null, request(CONSUMER, kib().activeDisputes(2))),
             new TestCheckScenario("overdue-episodes-unavailable",
-                    "СПР не построил эпизоды просрочки: новые диапазоны дают NO_DATA, заявка уходит андеррайтеру",
+                    "В отчёте КИБ нет платежных календарей: эпизоды не построены, новые диапазоны дают NO_DATA, заявка уходит андеррайтеру",
                     UNDERWRITER, null, request(CONSUMER, kib().episodesUnavailable())),
             new TestCheckScenario("scoring-without-product",
                     "Скоринг без продукта: сегмент RETAIL, ограничения по продуктам не действуют",
@@ -111,6 +126,7 @@ final class TestCheckScenarios {
         private int openCredits;
         private List<Loan> loans = List.of(new Loan(RoleOfClient.MainDebtor, LoanStatus.Open, 0, 0, 0));
         private List<OverdueEpisode> episodes = List.of();
+        private List<Contract> contracts;
         private boolean episodesUnavailable;
         private Set<KibPart> missing = Set.of();
 
@@ -120,12 +136,13 @@ final class TestCheckScenarios {
         KibBuilder openCredits(int count) { openCredits = count; return this; }
         KibBuilder loan(Loan loan) { loans = List.of(loan); return this; }
         KibBuilder episodes(List<OverdueEpisode> list) { episodes = list; return this; }
+        KibBuilder contracts(List<Contract> list) { contracts = list; return this; }
         KibBuilder episodesUnavailable() { episodesUnavailable = true; return this; }
         KibBuilder missing(KibPart part) { missing = Set.of(part); return this; }
 
         Kib build() {
             return new Kib(activeDisputes, 0, bureauRequests, BigDecimal.ZERO, newCredits, openCredits,
-                    loans, episodes, episodesUnavailable, null, missing);
+                    loans, episodes, contracts, episodesUnavailable, null, missing);
         }
     }
 }

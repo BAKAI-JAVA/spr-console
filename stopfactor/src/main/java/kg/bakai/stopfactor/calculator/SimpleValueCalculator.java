@@ -1,20 +1,19 @@
 package kg.bakai.stopfactor.calculator;
 
+import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
-import kg.bakai.stopfactor.dto.scoring.StopFactorIntegerValueDto;
 import kg.bakai.stopfactor.enums.CalculatorType;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.ToDoubleFunction;
 
-public class SimpleValueCalculator extends AbstractStopFactorCalculator {
+/** A value of the reports as is, without params: disputes, current overdue, open credits. */
+public class SimpleValueCalculator extends ParameterlessCalculator {
 
     private final CalculatorType type;
-    private final ToDoubleFunction<StopFactorIntegerValueDto> extractor;
+    private final ToDoubleFunction<ReportValues> extractor;
 
-    public SimpleValueCalculator(CalculatorType type, ToDoubleFunction<StopFactorIntegerValueDto> extractor) {
+    public SimpleValueCalculator(CalculatorType type, ToDoubleFunction<ReportValues> extractor) {
         this.type = type;
         this.extractor = extractor;
     }
@@ -30,12 +29,7 @@ public class SimpleValueCalculator extends AbstractStopFactorCalculator {
     }
 
     @Override
-    public List<ParamSpec> paramSpecs() {
-        return List.of();
-    }
-
-    @Override
-    public Optional<CheckedValue> calculate(Map<String, Object> params, StopFactorCheckRequest request) {
+    public Optional<CheckedValue> calculate(NoParams params, StopFactorCheckRequest request) {
         return Optional.of(CheckedValue.ofNumber(extractor.applyAsDouble(request.values())));
     }
 }

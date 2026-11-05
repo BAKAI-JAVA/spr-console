@@ -71,6 +71,7 @@ class StopFactorServiceImplTest {
     private final StopFactorMetricRepository metricRepository = mock(StopFactorMetricRepository.class);
     private final StopFactorConsoleService consoleService = mock(StopFactorConsoleService.class);
     private final KibService kibService = mock(KibService.class);
+    private final KibOverdueEpisodeCalculator episodeCalculator = mock(KibOverdueEpisodeCalculator.class);
 
     private final List<StopFactor> activeStopFactors = new ArrayList<>();
     private final List<StopFactorCondition> conditions = new ArrayList<>();
@@ -83,26 +84,26 @@ class StopFactorServiceImplTest {
     void setUp() {
         // same calculators as CalculatorConfig + the @Component calculators
         CalculatorRegistry registry = new CalculatorRegistry(List.of(
-                new SimpleValueCalculator(KIB_ACTIVE_DISPUTES, StopFactorIntegerValueDto::numberOfActiveDisputes),
-                new SimpleValueCalculator(KIB_UNJUSTIFIED_DISPUTES, StopFactorIntegerValueDto::numberOfUnjustifiedDisputesInPast),
-                new SimpleValueCalculator(CURRENT_OVERDUE_DAYS, StopFactorIntegerValueDto::currentNumberOfDaysOverdue),
-                new SimpleValueCalculator(CURRENT_OVERDUE_AMOUNT, StopFactorIntegerValueDto::currentAmountOfOverdue),
-                new SimpleValueCalculator(OPEN_CREDITS_COUNT, StopFactorIntegerValueDto::totalOpenCreditContracts),
+                new SimpleValueCalculator(KIB_ACTIVE_DISPUTES, ReportValues::numberOfActiveDisputes),
+                new SimpleValueCalculator(KIB_UNJUSTIFIED_DISPUTES, ReportValues::numberOfUnjustifiedDisputesInPast),
+                new SimpleValueCalculator(CURRENT_OVERDUE_DAYS, ReportValues::currentNumberOfDaysOverdue),
+                new SimpleValueCalculator(CURRENT_OVERDUE_AMOUNT, ReportValues::currentAmountOfOverdue),
+                new SimpleValueCalculator(OPEN_CREDITS_COUNT, ReportValues::totalOpenCreditContracts),
                 new RecentEventsCountCalculator(BUREAU_REQUESTS_COUNT,
-                        CreditHistoryEvents::bureauRequestsDaysAgo, 7, StopFactorIntegerValueDto::creditInquiriesLast7Days),
+                        CreditHistoryEvents::bureauRequestsDaysAgo, 7, ReportValues::creditInquiriesLast7Days),
                 new RecentEventsCountCalculator(NEW_CREDITS_COUNT,
-                        CreditHistoryEvents::newCreditsDaysAgo, 30, StopFactorIntegerValueDto::totalNumberOfNewOpenLoansInTheLast30Days),
+                        CreditHistoryEvents::newCreditsDaysAgo, 30, ReportValues::totalNumberOfNewOpenLoansInTheLast30Days),
                 new KibRefusalStatusesCalculator(),
                 new OverdueBucketCountCalculator(),
                 new RestructuringCountCalculator()
         ));
-        service = new StopFactorServiceImpl(stopFactorRepository, conditionRepository, checkRepository,
-                metricRepository, consoleService, new StopFactorValuesInitializer(kibService), registry);
+        service = new StopFactorServiceImpl(stopFactorRepository, conditionRepository, checkRepository, metricRepository,
+                consoleService, new StopFactorValuesInitializer(kibService, episodeCalculator), registry);
 
         when(stopFactorRepository.findCurrentActiveWithMetric()).thenReturn(activeStopFactors);
         when(stopFactorRepository.findProductByScoringId(anyLong())).thenReturn(Optional.empty());
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
-        when(kibService.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> kibEpisodes);
+        when(episodeCalculator.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> kibEpisodes);
         when(conditionRepository.findAllByStopFactor_IdIn(anyCollection())).thenAnswer(invocation -> {
             Collection<Long> stopFactorIds = invocation.getArgument(0);
             return conditions.stream()
@@ -388,7 +389,7 @@ class StopFactorServiceImplTest {
     }
 
     @Nested
-    @DisplayName("Overdue episodes from SPR (KibService.getOverdueEpisodes)")
+    @DisplayName("Overdue episodes of the KIB payment calendars (KibOverdueEpisodeCalculator)")
     class OverdueEpisodes {
 
         @Test
@@ -423,7 +424,7 @@ class StopFactorServiceImplTest {
             kibEpisodes = List.of();
 
             assertThat(check(new Application()).status()).isEqualTo(APPROVED);
-            verify(kibService).getOverdueEpisodes(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
+            verify(episodeCalculator).getOverdueEpisodes(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
         }
 
         @Test

@@ -53,9 +53,12 @@ class StopFactorDefinitionValidator {
         }
     }
 
+    /**
+     * Checks and normalizes the conditions of a stop factor: REJECTED or UNDERWRITER, at most one of each, a value
+     * type that fits the metric.
+     */
     List<ConditionDto> validateConditions(StopFactorMetric metric, List<ConditionDto> conditions, List<String> errors) {
-        StopFactorCalculator calculator = calculatorRegistry.get(metric.getCalculator());
-        ValueKind kind = calculator.valueKind();
+        ValueKind kind = calculatorRegistry.get(metric.getCalculator()).valueKind();
         List<ConditionDto> normalized = new ArrayList<>();
         Set<StopFactorStatus> seenResults = EnumSet.noneOf(StopFactorStatus.class);
 

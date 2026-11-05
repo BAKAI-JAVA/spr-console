@@ -10,6 +10,7 @@ import java.util.List;
 
 public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck, Long> {
 
+    /** Results of a scoring with the conditions of the version each one was made with. */
     @Query(value = """
             select
                 coalesce(sf.root_id, sf.id) as "stopFactorId",
@@ -18,14 +19,14 @@ public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck
                 sf.name as "stopFactorName",
                 c.result as "checkResult",
                 c.checked_value as "checkedValue",
-                sfc.value as "rejectedValue",
-                sfc.value_type as "rejectedValueType",
-                sfc2.value as "underwriterValue",
-                sfc2.value_type as "underwriterValueType"
+                rej.value as "rejectedValue",
+                rej.value_type as "rejectedValueType",
+                uw.value as "underwriterValue",
+                uw.value_type as "underwriterValueType"
             from stop_factors.stop_factor_check c
             join stop_factors.stop_factor sf on sf.id = c.stop_factor_id
-            left join stop_factors.stop_factor_condition sfc on sf.id = sfc.stop_factor_id and sfc.result = 'REJECTED'
-            left join stop_factors.stop_factor_condition sfc2 on sf.id = sfc2.stop_factor_id and sfc2.result = 'UNDERWRITER'
+            left join stop_factors.stop_factor_condition rej on rej.stop_factor_id = sf.id and rej.result = 'REJECTED'
+            left join stop_factors.stop_factor_condition uw on uw.stop_factor_id = sf.id and uw.result = 'UNDERWRITER'
             where c.scoring_id = :scoringId
             order by sf.order_number, sf.id
             """, nativeQuery = true)

@@ -1,6 +1,7 @@
 package kg.bakai.stopfactor;
 
 import kg.bakai.spr.core.kib.KibService;
+import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator;
 import kg.bakai.spr.core.kib.dto.ConsolidationDto;
 import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
@@ -115,6 +116,8 @@ class StopFactorRules2026Test {
 
     @MockitoBean
     private KibService kibService;
+    @MockitoBean
+    private KibOverdueEpisodeCalculator episodeCalculator;
 
     @Autowired
     private StopFactorService stopFactorService;
@@ -143,7 +146,7 @@ class StopFactorRules2026Test {
                 PRODUCT_WITHOUT_SEGMENT);
 
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenReturn(OverdueForStopFactor.NONE);
-        when(kibService.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> episodes);
+        when(episodeCalculator.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> episodes);
 
         ruleIds = rulesInDatabase();
     }

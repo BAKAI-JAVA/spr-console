@@ -1,6 +1,7 @@
 package kg.bakai.stopfactor;
 
 import kg.bakai.spr.core.kib.KibService;
+import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator;
 import kg.bakai.spr.core.kib.dto.ConsolidationDto;
 import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
@@ -50,7 +51,7 @@ import static org.mockito.Mockito.when;
  * value, and the application the same decision. Also checks scorings made before and after a stop factor change.
  * <p>
  * The legacy algorithm only knows ids 1..34, so every test first brings the stop factors back to the state of
- * changelog 1.3 ({@link #rewindToChangelog13()}) and SPR returns no overdue episodes, so the overdue stop factors
+ * changelog 1.3 ({@link #rewindToChangelog13()}) and no overdue episodes can be built, so the overdue stop factors
  * read the legacy counters. Every test runs in a transaction that is rolled back.
  */
 @SpringBootTest
@@ -61,6 +62,8 @@ class LegacyStopFactorParityTest {
 
     @MockitoBean
     private KibService kibService;
+    @MockitoBean
+    private KibOverdueEpisodeCalculator episodeCalculator;
 
     @Autowired
     private StopFactorService stopFactorService;
@@ -82,7 +85,7 @@ class LegacyStopFactorParityTest {
         List<StopFactor> all = stopFactorRepository.findAll();
         assertThat(all).hasSize(34).allMatch(sf -> sf.getVersionNumber() == 1 && sf.getId() <= 34 && sf.getSegment() == null);
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
-        when(kibService.getOverdueEpisodes(any(), any())).thenReturn(null);
+        when(episodeCalculator.getOverdueEpisodes(any(), any())).thenReturn(null);
     }
 
     /**
@@ -219,7 +222,7 @@ class LegacyStopFactorParityTest {
 
     /**
      * Known difference: legacy returned a hardcoded 0 for 13, 14, 15, 16, 19 (inactive since 2024). Their periods
-     * have no legacy counter, so if someone activates them while SPR returns no overdue episodes, they go to the
+     * have no legacy counter, so if someone activates them while no overdue episodes can be built, they go to the
      * underwriter instead of always passing.
      */
     @Test
@@ -354,13 +357,13 @@ class LegacyStopFactorParityTest {
         ) {
             StopFactorStatus globalStopFactorStatus = APPROVED;
             InternalStatusCode internalStatusCode = null;
-            StopFactorIntegerValueDto stopFactorIntegerValueDto = initializeStopFactorIntegerValueDto(customReport, individualReport, consolidationDto, totalDebt, requestDate);
+            ReportValues reportValues = initializeStopFactorIntegerValueDto(customReport, individualReport, consolidationDto, totalDebt, requestDate);
 
             var stopFactors = stopFactorRepository.findAllActive();
             List<StopFactorCheck> stopFactorChecks = new ArrayList<>();
 
             for (var s : stopFactors) {
-                double count = getVariableFunction(s.getId(), stopFactorIntegerValueDto);
+                double count = getVariableFunction(s.getId(), reportValues);
                 StopFactorCheck stopFactorCheck = new StopFactorCheck(scoringId, s, String.valueOf(count));
                 stopFactorCheck = getStopFactorCheck(scoringId, individualReport, s, stopFactorCheck, count, REJECTED);
 
@@ -411,7 +414,7 @@ class LegacyStopFactorParityTest {
             return stopFactorCheck;
         }
 
-        private double getVariableFunction(long stopFactorId, StopFactorIntegerValueDto dto) {
+        private double getVariableFunction(long stopFactorId, ReportValues dto) {
             return switch ((int) stopFactorId) {
                 case 1, 13, 14, 15, 16, 19 -> 0;
                 case 2 -> dto.numberOfActiveDisputes();
@@ -446,11 +449,11 @@ class LegacyStopFactorParityTest {
             };
         }
 
-        private StopFactorIntegerValueDto initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
+        private ReportValues initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
             if (customReport != null && individualReport != null && consolidationDto != null) {
                 CountOfChanges countOfChangesOb = getCountOfChangesOb(totalDebt.getCredits(), requestDate);
                 var overdue = kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay());
-                return new StopFactorIntegerValueDto(
+                return new ReportValues(
                         individualReport.generalInfoDto().numberOfActiveDisputes(),
                         individualReport.generalInfoDto().numberOfUnjustifiedDisputesInPast(),
                         getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
@@ -467,7 +470,7 @@ class LegacyStopFactorParityTest {
                 );
             }
 
-            return new StopFactorIntegerValueDto(
+            return new ReportValues(
                     totalDebt.getCredits().stream().mapToLong(TotalDebtReportData::getCurrentOverdueDaysCount).max().orElse(0),
                     (totalDebt.getCredits().stream().map(credit -> Optional.ofNullable(credit.getCurrentOverdueSum()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add)).doubleValue()
             );

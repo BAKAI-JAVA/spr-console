@@ -1,7 +1,8 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
+import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
 import kg.bakai.stopfactor.dto.scoring.OverdueForStopFactor;
+import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import org.springframework.stereotype.Component;
@@ -9,19 +10,32 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.function.ToIntFunction;
 
+/**
+ * Count of continuous overdue episodes in a period of months whose maximum overdue is in a range of days
+ * (both bounds included).
+ */
 @Component
-public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator {
+public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator<OverdueBucketCountCalculator.Bucket> {
 
     static final String PERIOD_FROM = "periodFromMonth";
     static final String PERIOD_TO = "periodToMonth";
     static final String MIN_OVERDUE = "minOverdueDays";
     static final String MAX_OVERDUE = "maxOverdueDays";
 
-    private record Bucket(int periodFrom, int periodTo, int minOverdue, Integer maxOverdue) {
-    }
+    /**
+     * @param maxOverdue null - no upper bound
+     */
+    public record Bucket(int periodFrom, int periodTo, int minOverdue, Integer maxOverdue) {
 
+        boolean contains(OverdueEpisode episode) {
+            return episode.monthsAgo() >= periodFrom && episode.monthsAgo() <= periodTo
+                    && episode.maxOverdueDays() >= minOverdue
+                    && (maxOverdue == null || episode.maxOverdueDays() <= maxOverdue);
+        }
+    }
     // Legacy counter read by each original stop factor's params. The field names do not match the ranges:
     // this mapping keeps the results the original stop factors always had
     private static final Map<Bucket, ToIntFunction<OverdueForStopFactor>> LEGACY_FIELDS = Map.ofEntries(
@@ -71,29 +85,28 @@ public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator {
     }
 
     @Override
-    public Optional<CheckedValue> calculate(Map<String, Object> params, StopFactorCheckRequest request) {
-        Bucket bucket = new Bucket(
+    public Bucket parseParams(Map<String, Object> params) {
+        return new Bucket(
                 intParam(params, PERIOD_FROM),
                 intParam(params, PERIOD_TO),
                 intParam(params, MIN_OVERDUE),
-                optionalIntParam(params, MAX_OVERDUE)
-        );
+                optionalIntParam(params, MAX_OVERDUE));
+    }
 
-        List<CreditHistoryEvents.OverdueEpisode> episodes = request.history() != null ? request.history().overdueEpisodes() : null;
-        if (episodes != null) {
-            long count = episodes.stream()
-                    .filter(e -> e.monthsAgo() >= bucket.periodFrom() && e.monthsAgo() <= bucket.periodTo())
-                    .filter(e -> e.maxOverdueDays() >= bucket.minOverdue())
-                    .filter(e -> bucket.maxOverdue() == null || e.maxOverdueDays() <= bucket.maxOverdue())
-                    .count();
-            return Optional.of(CheckedValue.ofNumber(count));
-        }
+    @Override
+    public Optional<CheckedValue> calculate(Bucket bucket, StopFactorCheckRequest request) {
+        return EventCount.count(
+                request.history() != null ? request.history().overdueEpisodes() : null,
+                bucket::contains,
+                () -> legacyCount(bucket, request.values()));
+    }
 
+    private static OptionalDouble legacyCount(Bucket bucket, ReportValues values) {
         ToIntFunction<OverdueForStopFactor> legacyField = LEGACY_FIELDS.get(bucket);
         if (legacyField == null) {
-            return Optional.empty();
+            return OptionalDouble.empty();
         }
-        OverdueForStopFactor overdue = request.values().overdue();
-        return Optional.of(CheckedValue.ofNumber(overdue != null ? legacyField.applyAsInt(overdue) : 0));
+        OverdueForStopFactor overdue = values.overdue();
+        return OptionalDouble.of(overdue != null ? legacyField.applyAsInt(overdue) : 0);
     }
 }

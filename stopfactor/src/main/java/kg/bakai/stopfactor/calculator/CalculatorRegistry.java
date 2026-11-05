@@ -8,10 +8,10 @@ import java.util.*;
 @Component
 public class CalculatorRegistry {
 
-    private final Map<CalculatorType, StopFactorCalculator> calculators = new EnumMap<>(CalculatorType.class);
+    private final Map<CalculatorType, StopFactorCalculator<?>> calculators = new EnumMap<>(CalculatorType.class);
 
-    public CalculatorRegistry(List<StopFactorCalculator> calculators) {
-        for (StopFactorCalculator calculator : calculators) {
+    public CalculatorRegistry(List<StopFactorCalculator<?>> calculators) {
+        for (StopFactorCalculator<?> calculator : calculators) {
             if (this.calculators.put(calculator.type(), calculator) != null) {
                 throw new IllegalStateException("Для " + calculator.type() + " зарегистрировано больше одного калькулятора");
             }
@@ -23,11 +23,11 @@ public class CalculatorRegistry {
         }
     }
 
-    public StopFactorCalculator get(CalculatorType type) {
+    public StopFactorCalculator<?> get(CalculatorType type) {
         return calculators.get(type);
     }
 
-    public Collection<StopFactorCalculator> all() {
+    public Collection<StopFactorCalculator<?>> all() {
         return Collections.unmodifiableCollection(calculators.values());
     }
 }

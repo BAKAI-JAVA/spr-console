@@ -8,9 +8,10 @@ import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
-import kg.bakai.stopfactor.dto.scoring.StopFactorIntegerValueDto;
+import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -31,12 +32,13 @@ import static java.time.temporal.ChronoUnit.MONTHS;
 class StopFactorValuesInitializer {
 
     private final KibService kibService;
+    private final KibOverdueEpisodeCalculator overdueEpisodeCalculator;
 
     /**
      * Without a full KIB report (custom report, individual report and consolidation) only the current overdue
      * from OB is known, all other values are 0.
      */
-    StopFactorIntegerValueDto values(CustomReport customReport, IndividualReport individualReport,
+    ReportValues values(CustomReport customReport, IndividualReport individualReport,
                                      ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt,
                                      LocalDate requestDate) {
         List<TotalDebtReportData> obCredits = totalDebt.getCredits();
@@ -44,12 +46,12 @@ class StopFactorValuesInitializer {
         double obOverdueSum = getOverdueSum(obCredits);
 
         if (customReport == null || individualReport == null || consolidationDto == null) {
-            return new StopFactorIntegerValueDto(obOverdueDays, obOverdueSum);
+            return new ReportValues(obOverdueDays, obOverdueSum);
         }
 
         CountOfChanges countOfChangesOb = getCountOfChangesOb(obCredits, requestDate);
         var overdue = kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay());
-        return new StopFactorIntegerValueDto(
+        return new ReportValues(
                 individualReport.generalInfoDto().numberOfActiveDisputes(),
                 individualReport.generalInfoDto().numberOfUnjustifiedDisputesInPast(),
                 getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
@@ -71,16 +73,33 @@ class StopFactorValuesInitializer {
      * <ul>
      *     <li>without a full KIB report the client has no credit history: no episodes, every overdue count is 0,
      *     like the legacy values;</li>
-     *     <li>SPR could not build the episodes (null): null, the overdue stop factors use the legacy counters.</li>
+     *     <li>the episodes cannot be built from the report (no payment calendars, null): null, the overdue stop
+     *     factors use the legacy counters.</li>
      * </ul>
      */
     CreditHistoryEvents history(CustomReport customReport, IndividualReport individualReport,
-                                          ConsolidationDto consolidationDto, LocalDate requestDate) {
+                                ConsolidationDto consolidationDto, LocalDate requestDate) {
         if (customReport == null || individualReport == null || consolidationDto == null) {
             return new CreditHistoryEvents(List.of(), null, null, null);
         }
-        List<OverdueEpisode> episodes = kibService.getOverdueEpisodes(customReport, requestDate.atStartOfDay());
+        List<OverdueEpisode> episodes = overdueEpisodeCalculator.getOverdueEpisodes(customReport, requestDate.atStartOfDay());
         return episodes != null ? new CreditHistoryEvents(List.copyOf(episodes), null, null, null) : null;
+    }
+
+    /**
+     * Statuses of the loans where the client is the main debtor or a guarantor, in report order; empty without
+     * an individual report.
+     */
+    List<String> loanStatuses(IndividualReport individualReport) {
+        if (individualReport == null) {
+            return List.of();
+        }
+        return individualReport.loanDtoList().stream()
+                .filter(StopFactorValuesInitializer::isMainDebtorOrGuarantor)
+                .map(LoanDto::getLoanStatus)
+                .filter(Objects::nonNull)
+                .map(Enum::name)
+                .toList();
     }
 
     /**

@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * Raw credit history events. A calculator uses a list when it is not null and falls back to the legacy values of
- * {@link StopFactorIntegerValueDto} when it is null.
+ * {@link ReportValues} when it is null.
  */
 public record CreditHistoryEvents(
         List<@NotNull @Valid OverdueEpisode> overdueEpisodes,
@@ -18,7 +18,7 @@ public record CreditHistoryEvents(
 ) {
 
     /**
-     * One continuous overdue, see KibService.getOverdueEpisodes in SPR.
+     * One continuous overdue, built by KibOverdueEpisodeCalculator from the KIB payment calendars.
      *
      * @param monthsAgo      month the maximum overdue was reached, counted back from the request (1 - the last month)
      * @param maxOverdueDays largest number of overdue days in the episode

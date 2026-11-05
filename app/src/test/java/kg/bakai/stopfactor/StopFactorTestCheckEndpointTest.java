@@ -112,7 +112,7 @@ class StopFactorTestCheckEndpointTest {
 
         assertThat(result.decision()).isEqualTo(UNDERWRITER);
         assertThat(result.checks()).anyMatch(c -> "NO_DATA".equals(c.getCheckedValue()));
-        assertThat(result.imitated()).anyMatch(s -> s.startsWith("СПР не построил эпизоды просрочки"));
+        assertThat(result.imitated()).anyMatch(s -> s.startsWith("В отчёте КИБ нет платежных календарей"));
     }
 
     @Test
