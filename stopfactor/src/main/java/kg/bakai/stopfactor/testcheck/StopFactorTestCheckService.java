@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -148,26 +149,36 @@ public class StopFactorTestCheckService {
     private static CustomReport customReport(Kib kib, LocalDate requestDate, List<String> imitated) {
         List<Contract> contracts = new ArrayList<>();
         if (kib.contracts() != null) {
-            kib.contracts().forEach(c -> contracts.add(contract(c.role(), c.calendar() == null ? List.of() : c.calendar().stream()
-                    .map(e -> new CalendarItem(e.date().atStartOfDay(), e.pastDueDays()))
-                    .toList())));
+            kib.contracts().forEach(c -> {
+                List<CalendarItem> calendar = c.calendar() == null ? List.of() : c.calendar().stream()
+                        .map(e -> new CalendarItem(e.date().atStartOfDay(), e.pastDueDays(), e.maxPastDueDays()))
+                        .toList();
+                LocalDateTime startDate = c.startDate() != null ? c.startDate().atStartOfDay() : firstMonth(calendar);
+                contracts.add(contract(c.role(), startDate, calendar));
+            });
         }
         if (kib.overdueEpisodes() != null) {
-            kib.overdueEpisodes().forEach(e -> contracts.add(contract(RoleOfClient.MainDebtor, List.of(new CalendarItem(
-                    requestDate.minusMonths(e.monthsAgo() - 1L).atStartOfDay(), e.maxOverdueDays())))));
+            kib.overdueEpisodes().forEach(e -> {
+                LocalDateTime month = requestDate.minusMonths(e.monthsAgo() - 1L).atStartOfDay();
+                contracts.add(contract(RoleOfClient.MainDebtor, month, List.of(new CalendarItem(month, 0, e.maxOverdueDays()))));
+            });
         }
         if (kib.episodesUnavailable()) {
-            List<Contract> withoutCalendars = contracts.stream().map(c -> contract(c.roleOfClient(), List.of())).toList();
+            List<Contract> withoutCalendars = contracts.stream().map(c -> contract(c.roleOfClient(), c.startDate(), List.of())).toList();
             contracts.clear();
-            contracts.addAll(withoutCalendars.isEmpty() ? List.of(contract(RoleOfClient.MainDebtor, List.of())) : withoutCalendars);
+            contracts.addAll(withoutCalendars.isEmpty() ? List.of(contract(RoleOfClient.MainDebtor, null, List.of())) : withoutCalendars);
             imitated.add("В отчёте КИБ нет платежных календарей: эпизоды просрочки не построены, правила по просрочкам "
                     + "читают 17 старых счётчиков, диапазоны без счётчика дают NO_DATA, заявка уходит андеррайтеру");
         }
         return new CustomReport(new Contracts(new ContractList(contracts)), kib.legacyOverdue());
     }
 
-    private static Contract contract(RoleOfClient role, List<CalendarItem> calendar) {
-        return new Contract(Objects.requireNonNullElse(role, RoleOfClient.MainDebtor), new PaymentCalendarList(calendar));
+    private static Contract contract(RoleOfClient role, LocalDateTime startDate, List<CalendarItem> calendar) {
+        return new Contract(Objects.requireNonNullElse(role, RoleOfClient.MainDebtor), startDate, new PaymentCalendarList(calendar));
+    }
+
+    private static LocalDateTime firstMonth(List<CalendarItem> calendar) {
+        return calendar.stream().map(CalendarItem::date).filter(Objects::nonNull).min(LocalDateTime::compareTo).orElse(null);
     }
 
     private static List<LoanDto> loans(Kib kib) {

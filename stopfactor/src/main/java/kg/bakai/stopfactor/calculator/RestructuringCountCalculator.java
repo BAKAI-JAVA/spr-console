@@ -2,7 +2,6 @@ package kg.bakai.stopfactor.calculator;
 
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.RestructuringEvent;
-import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import org.springframework.stereotype.Component;
@@ -12,11 +11,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.Set;
-import java.util.function.ToDoubleFunction;
 
-/** Count of restructurings in KIB, or changes of credits in OB, in a period of months. */
+/**
+ * Count of restructurings in KIB, or changes of credits in OB, in a period of months. Without raw events: the legacy
+ * counter of months 1..12 or 13..24.
+ */
 @Component
 public class RestructuringCountCalculator extends AbstractStopFactorCalculator<RestructuringCountCalculator.Window> {
 
@@ -30,14 +30,6 @@ public class RestructuringCountCalculator extends AbstractStopFactorCalculator<R
             return event.source() == source && event.monthsAgo() >= periodFrom && event.monthsAgo() <= periodTo;
         }
     }
-
-    // The only windows the reports have a value for; SPR does not provide raw restructuring events
-    private static final Map<Window, ToDoubleFunction<ReportValues>> LEGACY_FIELDS = Map.of(
-            new Window(CreditHistoryEvents.Source.KIB, 1, 12), ReportValues::numberOfRestructuringsLast12Months,
-            new Window(CreditHistoryEvents.Source.OB, 1, 12), ReportValues::countOfChangesObLast12Month,
-            new Window(CreditHistoryEvents.Source.KIB, 13, 24), ReportValues::numberOfRestructuringsFrom12To24Months,
-            new Window(CreditHistoryEvents.Source.OB, 13, 24), ReportValues::countOfChangesObFrom13To24Months
-    );
 
     @Override
     public CalculatorType type() {
@@ -78,9 +70,6 @@ public class RestructuringCountCalculator extends AbstractStopFactorCalculator<R
         return EventCount.count(
                 request.history() != null ? request.history().restructurings() : null,
                 window::contains,
-                () -> {
-                    ToDoubleFunction<ReportValues> legacyField = LEGACY_FIELDS.get(window);
-                    return legacyField != null ? OptionalDouble.of(legacyField.applyAsDouble(request.values())) : OptionalDouble.empty();
-                });
+                () -> request.values().legacy().restructurings(window.source(), window.periodFrom(), window.periodTo()));
     }
 }

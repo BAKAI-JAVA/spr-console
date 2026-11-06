@@ -13,14 +13,7 @@ import java.util.Optional;
 
 public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
 
-    @Query(value = """
-            SELECT * FROM stop_factors.stop_factor
-            WHERE is_active = true
-              AND valid_to IS NULL
-            ORDER BY order_number, id
-            """, nativeQuery = true)
-    List<StopFactor> findAllActive();
-
+    /** Current versions of the active stop factors with their metrics, in display order. */
     @Query("""
             select sf from StopFactor sf
             join fetch sf.metric

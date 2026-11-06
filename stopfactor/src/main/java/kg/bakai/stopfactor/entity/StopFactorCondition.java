@@ -3,6 +3,7 @@ package kg.bakai.stopfactor.entity;
 import jakarta.persistence.*;
 import kg.bakai.common.entity.BaseEntity;
 import jakarta.validation.constraints.NotNull;
+import kg.bakai.stopfactor.enums.ConditionOperator;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import lombok.Getter;
@@ -31,6 +32,15 @@ public class StopFactorCondition extends BaseEntity {
     @Column(name = "value_type", nullable = false)
     @Enumerated(EnumType.STRING)
     private StopFactorValueTypes valueType;
+
+    @NotNull
+    @Column(name = "operator", nullable = false, length = 16)
+    @Enumerated(EnumType.STRING)
+    private ConditionOperator operator;
+
+    /** Upper bound (included) of a {@link ConditionOperator#RANGE} condition, null for the other operators. */
+    @Column(name = "value_to", length = Integer.MAX_VALUE)
+    private String valueTo;
 
     @Column(name = "result")
     @Enumerated(EnumType.STRING)

@@ -21,8 +21,11 @@ public interface StopFactorCheckRepository extends JpaRepository<StopFactorCheck
                 c.checked_value as "checkedValue",
                 rej.value as "rejectedValue",
                 rej.value_type as "rejectedValueType",
+                rej.operator as "rejectedOperator",
                 uw.value as "underwriterValue",
-                uw.value_type as "underwriterValueType"
+                uw.value_type as "underwriterValueType",
+                uw.operator as "underwriterOperator",
+                uw.value_to as "underwriterValueTo"
             from stop_factors.stop_factor_check c
             join stop_factors.stop_factor sf on sf.id = c.stop_factor_id
             left join stop_factors.stop_factor_condition rej on rej.stop_factor_id = sf.id and rej.result = 'REJECTED'

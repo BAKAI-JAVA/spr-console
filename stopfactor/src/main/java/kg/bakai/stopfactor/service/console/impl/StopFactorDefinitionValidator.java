@@ -7,6 +7,7 @@ import kg.bakai.stopfactor.calculator.ValueKind;
 import kg.bakai.stopfactor.dto.console.MetricParamSchema;
 import kg.bakai.stopfactor.dto.console.ConditionDto;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
+import kg.bakai.stopfactor.enums.ConditionOperator;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import kg.bakai.stopfactor.evaluation.ConditionValues;
@@ -55,7 +56,10 @@ class StopFactorDefinitionValidator {
 
     /**
      * Checks and normalizes the conditions of a stop factor: REJECTED or UNDERWRITER, at most one of each, a value
-     * type that fits the metric.
+     * type and an operator that fit the metric, valueTo exactly for RANGE and BETWEEN, and an UNDERWRITER condition
+     * that can fire where REJECTED does not. An operator left out is IN for loan statuses and GT for numbers, and an
+     * UNDERWRITER number left without operator next to a REJECTED GT becomes RANGE up to the REJECTED value, as
+     * legacy thresholds meant ({@link #withDefaultOperators}).
      */
     List<ConditionDto> validateConditions(StopFactorMetric metric, List<ConditionDto> conditions, List<String> errors) {
         ValueKind kind = calculatorRegistry.get(metric.getCalculator()).valueKind();
@@ -78,16 +82,86 @@ class StopFactorDefinitionValidator {
                         + "', допустимые: " + new TreeSet<>(kind.conditionTypes()));
                 continue;
             }
-            String value = normalizeValue(condition.valueType(), condition.value(), prefix, errors);
-            if (value != null) {
-                normalized.add(new ConditionDto(null, condition.result(), condition.valueType(), value));
+            if (condition.operator() != null && !kind.operators().contains(condition.operator())) {
+                errors.add(prefix + "оператор " + condition.operator() + " (" + condition.operator().getName()
+                        + ") не подходит для метрики '" + metric.getTitle() + "', допустимые: " + kind.operators());
+                continue;
             }
+            String value = normalizeValue(condition.valueType(), condition.value(), prefix, errors);
+            if (value == null) {
+                continue;
+            }
+            ConditionOperator operator = condition.operator() != null ? condition.operator() : kind.operators().getFirst();
+            String valueTo = normalizeValueTo(condition, operator, value, prefix, errors);
+            if (operator.hasValueTo() && valueTo == null) {
+                continue;
+            }
+            normalized.add(new ConditionDto(null, condition.result(), condition.valueType(), value,
+                    condition.operator() != null ? operator : null, valueTo));
         }
 
-        if (normalized.size() == conditions.size()) {
-            checkConditionsConsistent(kind, normalized, errors);
+        if (normalized.size() != conditions.size()) {
+            return normalized;
         }
-        return normalized;
+        List<ConditionDto> withOperators = withDefaultOperators(kind, normalized);
+        checkConditionsConsistent(kind, withOperators, errors);
+        return withOperators;
+    }
+
+    /**
+     * valueTo of RANGE and BETWEEN: required, of the value type, above value. Other operators have none; errors are
+     * added and null is returned when it does not fit.
+     */
+    private String normalizeValueTo(ConditionDto condition, ConditionOperator operator, String value, String prefix,
+                                    List<String> errors) {
+        boolean sent = condition.valueTo() != null && !condition.valueTo().isBlank();
+        if (!operator.hasValueTo()) {
+            if (sent) {
+                errors.add(prefix + "valueTo указывается только для RANGE и BETWEEN, не для " + operator);
+            }
+            return null;
+        }
+        if (!sent) {
+            errors.add(prefix + "valueTo обязателен для " + operator + " (" + operator.getName() + ")");
+            return null;
+        }
+        String valueTo = normalizeValue(condition.valueType(), condition.valueTo(), prefix + "valueTo: ", errors);
+        if (valueTo != null && ConditionValues.parseNumber(valueTo).compareTo(ConditionValues.parseNumber(value)) <= 0) {
+            errors.add(prefix + "valueTo (" + valueTo + ") должно быть больше value (" + value + ")");
+            return null;
+        }
+        return valueTo;
+    }
+
+    /**
+     * Sets the operator of the conditions sent without one: IN for loan statuses, GT for numbers, and RANGE up to
+     * the REJECTED value for an UNDERWRITER number next to a REJECTED GT number, so "1 - Ок, 2 - жёлтая зона,
+     * 3+ - отказ" sent as legacy thresholds (UNDERWRITER 1, REJECTED 2) is stored as UNDERWRITER RANGE 1..2,
+     * REJECTED GT 2.
+     */
+    static List<ConditionDto> withDefaultOperators(ValueKind kind, List<ConditionDto> conditions) {
+        List<ConditionDto> withRejected = conditions.stream()
+                .map(c -> c.result() == StopFactorStatus.REJECTED ? withDefaultOperator(kind, c) : c)
+                .toList();
+        Optional<String> rejectedGreaterThan = withRejected.stream()
+                .filter(c -> c.result() == StopFactorStatus.REJECTED && c.operator() == ConditionOperator.GT)
+                .map(ConditionDto::value)
+                .findFirst();
+        return withRejected.stream().map(c -> {
+            if (c.operator() != null) {
+                return c;
+            }
+            boolean belowRejected = kind == ValueKind.NUMBER && rejectedGreaterThan.isPresent()
+                    && ConditionValues.parseNumber(c.value()).compareTo(ConditionValues.parseNumber(rejectedGreaterThan.get())) < 0;
+            return belowRejected
+                    ? new ConditionDto(c.id(), c.result(), c.valueType(), c.value(), ConditionOperator.RANGE, rejectedGreaterThan.get())
+                    : withDefaultOperator(kind, c);
+        }).toList();
+    }
+
+    private static ConditionDto withDefaultOperator(ValueKind kind, ConditionDto c) {
+        return c.operator() != null ? c
+                : new ConditionDto(c.id(), c.result(), c.valueType(), c.value(), kind.operators().getFirst(), c.valueTo());
     }
 
     void validateProducts(Set<Long> productIds, List<String> errors) {
@@ -158,6 +232,7 @@ class StopFactorDefinitionValidator {
         throw new IllegalArgumentException("Неподдерживаемый тип значения " + type);
     }
 
+    /** The UNDERWRITER condition must be able to fire: some value must fire it and not REJECTED. */
     private void checkConditionsConsistent(ValueKind kind, List<ConditionDto> conditions, List<String> errors) {
         Optional<ConditionDto> rejected = conditions.stream().filter(c -> c.result() == StopFactorStatus.REJECTED).findFirst();
         Optional<ConditionDto> underwriter = conditions.stream().filter(c -> c.result() == StopFactorStatus.UNDERWRITER).findFirst();
@@ -165,11 +240,9 @@ class StopFactorDefinitionValidator {
             return;
         }
         if (kind == ValueKind.NUMBER) {
-            BigDecimal rejectedValue = ConditionValues.parseNumber(rejected.get().value());
-            BigDecimal underwriterValue = ConditionValues.parseNumber(underwriter.get().value());
-            if (underwriterValue.compareTo(rejectedValue) >= 0) {
-                errors.add("conditions: значение UNDERWRITER (" + underwriterValue + ") должно быть меньше значения REJECTED ("
-                        + rejectedValue + "), иначе UNDERWRITER никогда не сработает");
+            if (NumberSet.of(underwriter.get()).within(NumberSet.of(rejected.get()))) {
+                errors.add("conditions: UNDERWRITER (" + describe(underwriter.get()) + ") никогда не сработает: все его значения"
+                        + " уже дают REJECTED (" + describe(rejected.get()) + "), REJECTED проверяется первым");
             }
         } else {
             Set<String> overlap = new HashSet<>(ConditionValues.parseItems(rejected.get().value()));
@@ -178,6 +251,60 @@ class StopFactorDefinitionValidator {
                 errors.add("conditions: значения " + new TreeSet<>(overlap)
                         + " указаны и в REJECTED, и в UNDERWRITER, они всегда будут REJECTED");
             }
+        }
+    }
+
+    private static String describe(ConditionDto c) {
+        return c.operator().hasValueTo()
+                ? c.operator().getName() + " " + c.value() + ".." + c.valueTo()
+                : c.operator().getName() + " " + c.value();
+    }
+
+    /**
+     * The numbers a number condition fires on, an interval: a null bound is unbounded.
+     */
+    private record NumberSet(BigDecimal from, boolean fromIncluded, BigDecimal to, boolean toIncluded) {
+
+        static NumberSet of(ConditionDto c) {
+            BigDecimal value = ConditionValues.parseNumber(c.value());
+            BigDecimal valueTo = c.valueTo() != null ? ConditionValues.parseNumber(c.valueTo()) : null;
+            return switch (c.operator()) {
+                case GT -> new NumberSet(value, false, null, false);
+                case GTE -> new NumberSet(value, true, null, false);
+                case LT -> new NumberSet(null, false, value, false);
+                case LTE -> new NumberSet(null, false, value, true);
+                case EQ -> new NumberSet(value, true, value, true);
+                case RANGE -> new NumberSet(value, false, valueTo, true);
+                case BETWEEN -> new NumberSet(value, true, valueTo, true);
+                case IN -> throw new IllegalArgumentException("IN is not a number condition");
+            };
+        }
+
+        /** Every number of this set is in the other one. */
+        boolean within(NumberSet other) {
+            return startsWithin(other) && endsWithin(other);
+        }
+
+        private boolean startsWithin(NumberSet other) {
+            if (other.from == null) {
+                return true;
+            }
+            if (from == null) {
+                return false;
+            }
+            int compare = from.compareTo(other.from);
+            return compare > 0 || compare == 0 && (other.fromIncluded || !fromIncluded);
+        }
+
+        private boolean endsWithin(NumberSet other) {
+            if (other.to == null) {
+                return true;
+            }
+            if (to == null) {
+                return false;
+            }
+            int compare = to.compareTo(other.to);
+            return compare < 0 || compare == 0 && (other.toIncluded || !toIncluded);
         }
     }
 }

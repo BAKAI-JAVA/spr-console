@@ -54,18 +54,26 @@ final class TestCheckScenarios {
                     "Просрочки 1-5 дней в 7-12 месяце и до 30 дней в 25-36 месяце: без ограничений",
                     APPROVED, null, request(CONSUMER, kib().episodes(List.of(new OverdueEpisode(8, 5), new OverdueEpisode(30, 30))))),
             new TestCheckScenario("kib-payment-calendars",
-                    "Платежные календари КИБ: просрочка 12 дней месяц назад (Ок), 25 дней 5 месяцев назад у поручителя "
-                            + "(с 4 по 6 месяц от 21 дня - отказ), просрочка созаемщика не учитывается",
+                    "Платежные календари КИБ (по месяцам, как в реальном отчёте): просрочка с сентября, не погашенная к концу "
+                            + "месяца, дошла до 12 дней в октябре - один эпизод (Ок); у поручителя 25 дней в июне, погашена в "
+                            + "том же месяце (с 4 по 6 месяц от 21 дня - отказ); просрочка созаемщика не учитывается",
                     REJECTED, null, request(CONSUMER, kib().contracts(List.of(
-                    new Contract(RoleOfClient.MainDebtor, List.of(
-                            new CalendarEntry(LocalDate.of(2026, 9, 10), 4),
-                            new CalendarEntry(LocalDate.of(2026, 10, 10), 12),
-                            new CalendarEntry(LocalDate.of(2026, 11, 1), 0))),
-                    new Contract(RoleOfClient.Guarantor, List.of(
-                            new CalendarEntry(LocalDate.of(2026, 6, 15), 25),
-                            new CalendarEntry(LocalDate.of(2026, 7, 15), 0))),
-                    new Contract(RoleOfClient.CoDebtor, List.of(
-                            new CalendarEntry(LocalDate.of(2026, 10, 1), 40))))))),
+                    new Contract(RoleOfClient.MainDebtor, null, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 9, 30), 4, 4),
+                            new CalendarEntry(LocalDate.of(2026, 10, 31), 12, 0),
+                            new CalendarEntry(LocalDate.of(2026, 11, 30), 0, 0))),
+                    new Contract(RoleOfClient.Guarantor, null, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 6, 30), 25, 0),
+                            new CalendarEntry(LocalDate.of(2026, 7, 31), 0, 0))),
+                    new Contract(RoleOfClient.CoDebtor, null, List.of(
+                            new CalendarEntry(LocalDate.of(2026, 10, 31), 40, 0))))))),
+            new TestCheckScenario("kib-calendar-shorter-than-contract",
+                    "Договор с 2020 года, календарь КИБ только за 24 месяца без просрочек: месяцы 25-36 не видны, у правил "
+                            + "25-36 месяцев нет старого счётчика - NO_DATA, андеррайтер",
+                    UNDERWRITER, null, request(CONSUMER, kib().contracts(List.of(
+                    new Contract(RoleOfClient.MainDebtor, LocalDate.of(2020, 1, 10), List.of(
+                            new CalendarEntry(LocalDate.of(2024, 12, 31), 0, 0),
+                            new CalendarEntry(LocalDate.of(2026, 11, 30), 0, 0))))))),
             new TestCheckScenario("product-limited-stop-factor",
                     "3 открытых кредита по Ипотеке: тестовый стоп-фактор только для Ипотеки и Автокредита (UNDERWRITER > 2)",
                     UNDERWRITER, null, request(MORTGAGE, kib().openCredits(3))),

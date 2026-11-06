@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local KIB report (personal data, never commit) ###
+stopfactor/src/main/java/kg/bakai/spr/core/kib/response.json

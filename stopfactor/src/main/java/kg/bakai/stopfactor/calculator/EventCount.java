@@ -8,7 +8,8 @@ import java.util.function.Supplier;
 
 /**
  * The one rule of the counting calculators: count the raw events of the credit history when SPR provided them,
- * otherwise take the legacy value of the reports if there is one for these params.
+ * otherwise take the legacy counter ({@link kg.bakai.stopfactor.dto.scoring.LegacyCounters}) if there is one for
+ * these params, otherwise there is no data.
  */
 final class EventCount {
 
@@ -18,8 +19,8 @@ final class EventCount {
     /**
      * @param rawEvents raw events, null when the history has no such list
      * @param counted   which events the stop factor counts
-     * @param legacy    legacy value for these params, empty if there is none
-     * @return the count, or empty (NO_DATA) without raw events and without a legacy value
+     * @param legacy    legacy counter for these params, empty if there is none
+     * @return the count, or empty (NO_DATA) without raw events and without a legacy counter
      */
     static <E> Optional<CheckedValue> count(List<E> rawEvents, Predicate<E> counted, Supplier<OptionalDouble> legacy) {
         if (rawEvents != null) {

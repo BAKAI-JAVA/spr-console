@@ -185,7 +185,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         next.setActive(active);
         StopFactor saved = stopFactorRepository.save(next);
         saveConditions(saved, conditions.stream()
-                .map(c -> new ConditionDto(null, c.getResult(), c.getValueType(), c.getValue()))
+                .map(c -> new ConditionDto(null, c.getResult(), c.getValueType(), c.getValue(), c.getOperator(), c.getValueTo()))
                 .toList());
         log.info("Стоп-фактор {} {} пользователем {} (версия {}): {}", factorId, active ? "активирован" : "деактивирован",
                 user, saved.getVersionNumber(), changeReason);
@@ -259,6 +259,8 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
             condition.setResult(request.result());
             condition.setValueType(request.valueType());
             condition.setValue(request.value());
+            condition.setOperator(request.operator());
+            condition.setValueTo(request.valueTo());
             return condition;
         }).toList();
         conditionRepository.saveAll(entities);
@@ -288,13 +290,13 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
     private static Set<String> conditionKeys(List<ConditionDto> conditions) {
         return conditions.stream()
-                .map(c -> c.result() + "|" + c.valueType() + "|" + c.value())
+                .map(c -> c.result() + "|" + c.valueType() + "|" + c.value() + "|" + c.operator() + "|" + c.valueTo())
                 .collect(Collectors.toSet());
     }
 
     private static Set<String> conditionKeysOf(List<StopFactorCondition> conditions) {
         return conditions.stream()
-                .map(c -> c.getResult() + "|" + c.getValueType() + "|" + c.getValue())
+                .map(c -> c.getResult() + "|" + c.getValueType() + "|" + c.getValue() + "|" + c.getOperator() + "|" + c.getValueTo())
                 .collect(Collectors.toSet());
     }
 
@@ -327,7 +329,8 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
                 sf.getSegment(),
                 conditions.stream()
                         .sorted(Comparator.comparing(StopFactorCondition::getResult))
-                        .map(c -> new ConditionDto(c.getId(), c.getResult(), c.getValueType(), c.getValue()))
+                        .map(c -> new ConditionDto(c.getId(), c.getResult(), c.getValueType(), c.getValue(),
+                                c.getOperator(), c.getValueTo()))
                         .toList(),
                 sf.getValidFrom(),
                 sf.getValidTo(),

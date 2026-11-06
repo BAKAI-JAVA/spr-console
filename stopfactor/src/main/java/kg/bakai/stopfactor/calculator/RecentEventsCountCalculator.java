@@ -1,7 +1,7 @@
 package kg.bakai.stopfactor.calculator;
 
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
-import kg.bakai.stopfactor.dto.scoring.ReportValues;
+import kg.bakai.stopfactor.dto.scoring.LegacyCounters;
 import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
 import kg.bakai.stopfactor.enums.CalculatorType;
 
@@ -9,12 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.function.ToDoubleFunction;
 
 /**
- * Count of events (bureau requests, new credits) in the last N days. The reports have a value for one period
- * only (legacyDays); other periods need the raw event dates.
+ * Count of events (bureau requests, new credits) in the last N days. Without the raw event dates: the legacy
+ * counter, which has one period only (7 days of bureau requests, 30 days of new credits).
  */
 public class RecentEventsCountCalculator extends AbstractStopFactorCalculator<RecentEventsCountCalculator.Period> {
 
@@ -24,18 +24,19 @@ public class RecentEventsCountCalculator extends AbstractStopFactorCalculator<Re
     }
 
     private final CalculatorType type;
-    private final Function<CreditHistoryEvents, List<Integer>> rawEvents;
-    private final int legacyDays;
-    private final ToDoubleFunction<ReportValues> legacyField;
+    private final Function<CreditHistoryEvents, List<Integer>> rawEventsDaysAgo;
+    private final BiFunction<LegacyCounters, Integer, OptionalDouble> legacyCount;
 
+    /**
+     * @param rawEventsDaysAgo the raw events of the history: days between each event and the request
+     * @param legacyCount      the legacy counter for a number of days, empty for other periods
+     */
     public RecentEventsCountCalculator(CalculatorType type,
-                                       Function<CreditHistoryEvents, List<Integer>> rawEvents,
-                                       int legacyDays,
-                                       ToDoubleFunction<ReportValues> legacyField) {
+                                       Function<CreditHistoryEvents, List<Integer>> rawEventsDaysAgo,
+                                       BiFunction<LegacyCounters, Integer, OptionalDouble> legacyCount) {
         this.type = type;
-        this.rawEvents = rawEvents;
-        this.legacyDays = legacyDays;
-        this.legacyField = legacyField;
+        this.rawEventsDaysAgo = rawEventsDaysAgo;
+        this.legacyCount = legacyCount;
     }
 
     @Override
@@ -61,8 +62,8 @@ public class RecentEventsCountCalculator extends AbstractStopFactorCalculator<Re
     @Override
     public Optional<CheckedValue> calculate(Period period, StopFactorCheckRequest request) {
         return EventCount.count(
-                request.history() != null ? rawEvents.apply(request.history()) : null,
+                request.history() != null ? rawEventsDaysAgo.apply(request.history()) : null,
                 daysAgo -> daysAgo <= period.days(),
-                () -> period.days() == legacyDays ? OptionalDouble.of(legacyField.applyAsDouble(request.values())) : OptionalDouble.empty());
+                () -> legacyCount.apply(request.values().legacy(), period.days()));
     }
 }

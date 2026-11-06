@@ -1,5 +1,9 @@
 package kg.bakai.stopfactor.dto.scoring;
 
+/**
+ * Overdue counters as SPR KibService.getOverdueByPeriodAndCount returns them, with the SPR names. The stop factor
+ * check reads them through {@link LegacyOverdueCounters#from}.
+ */
 public record OverdueForStopFactor(
         int countWherePeriodFrom1To3MonthsAndOverdueFrom1To15,
         int countWherePeriodFrom1To3MonthsAndOverdueFrom16To30,

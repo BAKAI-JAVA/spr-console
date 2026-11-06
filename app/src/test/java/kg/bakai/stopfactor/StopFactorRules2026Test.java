@@ -7,6 +7,7 @@ import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator.OverdueHistory;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
 import kg.bakai.stopfactor.dto.scoring.OverdueForStopFactor;
 import kg.bakai.stopfactor.dto.scoring.StopFactorDecision;
@@ -146,7 +147,8 @@ class StopFactorRules2026Test {
                 PRODUCT_WITHOUT_SEGMENT);
 
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenReturn(OverdueForStopFactor.NONE);
-        when(episodeCalculator.getOverdueEpisodes(any(), any())).thenAnswer(invocation -> episodes);
+        when(episodeCalculator.getOverdueHistory(any(), any()))
+                .thenAnswer(invocation -> episodes != null ? new OverdueHistory(episodes, null) : null);
 
         ruleIds = rulesInDatabase();
     }

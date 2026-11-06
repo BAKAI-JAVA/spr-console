@@ -57,18 +57,25 @@ public record TestCheckRequest(
     }
 
     /**
-     * A KIB contract of the client with its payment calendar.
+     * A KIB contract of the client with its monthly payment calendar.
      *
-     * @param role MainDebtor when omitted; CoDebtor contracts are not counted
+     * @param role      MainDebtor when omitted; CoDebtor contracts are not counted
+     * @param startDate start of the contract; the first calendar month when omitted. Earlier than the calendar:
+     *                  the history is not complete for the months before it
+     * @param calendar  one entry per month
      */
-    public record Contract(RoleOfClient role, List<CalendarEntry> calendar) {
+    public record Contract(RoleOfClient role, LocalDate startDate, List<CalendarEntry> calendar) {
     }
 
     /**
-     * @param date        date of the calendar entry
-     * @param pastDueDays days of overdue at this entry, 0 - no overdue
+     * One month of a KIB payment calendar, as KIB sends it.
+     *
+     * @param date           a day of the month (KIB sends its last day)
+     * @param maxPastDueDays largest overdue days reached during the month, 0 - no overdue
+     * @param pastDueDays    overdue days left at the end of the month: above 0 - the overdue goes on into the next
+     *                       month, 0 - repaid within the month
      */
-    public record CalendarEntry(LocalDate date, int pastDueDays) {
+    public record CalendarEntry(LocalDate date, int maxPastDueDays, int pastDueDays) {
     }
 
     @Schema(description = "A part of the KIB report: without any of them the check treats the client as having no KIB report")

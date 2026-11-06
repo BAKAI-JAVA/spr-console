@@ -3,6 +3,7 @@ package kg.bakai.stopfactor.evaluation;
 import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
 import kg.bakai.stopfactor.calculator.CheckedValue;
 import kg.bakai.stopfactor.entity.StopFactorCondition;
+import kg.bakai.stopfactor.enums.ConditionOperator;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import lombok.extern.slf4j.Slf4j;
 
@@ -21,9 +22,10 @@ import static kg.bakai.stopfactor.enums.StopFactorStatus.UNDERWRITER;
  * Applies the conditions of a stop factor to its measured value: the REJECTED condition first, the UNDERWRITER
  * condition only if it did not reject.
  * <ul>
- *     <li>a number condition (INTEGER, DOUBLE) holds the highest allowed value and fires when the value is greater;</li>
- *     <li>a status condition (ARRAY, or STRING for one status) fires when a loan of the client has one of its
- *     statuses; the checked value is that status, or {@link #NO_MATCHES}.</li>
+ *     <li>a number condition fires when its {@link ConditionOperator} holds for the value
+ *     ({@code >, >=, <, <=, =}, RANGE {@code value < x <= value_to}, BETWEEN {@code value <= x <= value_to});</li>
+ *     <li>{@link ConditionOperator#IN}: fires when a loan of the client has one of the statuses; the checked value
+ *     is that status, or {@link #NO_MATCHES}.</li>
  * </ul>
  */
 @Slf4j
@@ -57,21 +59,24 @@ public final class ConditionEvaluator {
     }
 
     private static Outcome test(StopFactorCondition condition, CheckedValue value) {
-        return switch (condition.getValueType()) {
-            case INTEGER, DOUBLE -> {
+        return switch (condition.getOperator()) {
+            case IN -> statusOutcome(condition, value);
+            default -> {
                 double number = number(value);
-                boolean fires = number > Double.parseDouble(condition.getValue().trim());
+                double valueTo = condition.getOperator().hasValueTo() ? Double.parseDouble(condition.getValueTo().trim()) : Double.NaN;
+                boolean fires = condition.getOperator().test(number, Double.parseDouble(condition.getValue().trim()), valueTo);
                 yield new Outcome(fires ? condition.getResult() : APPROVED, String.valueOf(number));
             }
-            case ARRAY, STRING -> {
-                Set<String> statuses = statuses(condition.getValue());
-                yield value.values().stream()
-                        .filter(statuses::contains)
-                        .findFirst()
-                        .map(status -> new Outcome(condition.getResult(), status))
-                        .orElseGet(() -> new Outcome(APPROVED, NO_MATCHES));
-            }
         };
+    }
+
+    private static Outcome statusOutcome(StopFactorCondition condition, CheckedValue value) {
+        Set<String> statuses = statuses(condition.getValue());
+        return value.values().stream()
+                .filter(statuses::contains)
+                .findFirst()
+                .map(status -> new Outcome(condition.getResult(), status))
+                .orElseGet(() -> new Outcome(APPROVED, NO_MATCHES));
     }
 
     /** The number of a value; a list value (loan statuses) counts as 0, as in legacy. */

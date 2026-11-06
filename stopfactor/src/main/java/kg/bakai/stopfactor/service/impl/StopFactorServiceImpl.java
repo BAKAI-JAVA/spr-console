@@ -19,6 +19,7 @@ import kg.bakai.stopfactor.entity.StopFactorCheck;
 import kg.bakai.stopfactor.entity.StopFactorCondition;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.stopfactor.enums.ConditionOperator;
 import kg.bakai.stopfactor.enums.InternalStatusCode;
 import kg.bakai.stopfactor.evaluation.ConditionEvaluator;
 import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
@@ -34,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -70,9 +72,6 @@ public class StopFactorServiceImpl implements StopFactorService {
      * that the report values do not cover). Such a stop factor sends the application to the underwriter.
      */
     public static final String NO_DATA = "NO_DATA";
-
-    /** Checked value of a loan status stop factor when no loan of the client has one of its statuses. */
-    static final String NO_MATCHES = ConditionEvaluator.NO_MATCHES;
 
     /** Author of the versions created through {@link #save} and {@link #saveCondition}. */
     static final String SPR_USER = "spr";
@@ -154,7 +153,9 @@ public class StopFactorServiceImpl implements StopFactorService {
     /**
      * Legacy saved the condition directly to the stop factor. Now conditions belong to a version, so the change
      * creates a new version: the old version keeps its conditions, and checks made with it still show them.
-     * A condition with the same result (REJECTED / UNDERWRITER) is replaced, the other one is kept.
+     * A condition with the same result (REJECTED / UNDERWRITER) is replaced by a legacy threshold (GT, or RANGE up
+     * to REJECTED for UNDERWRITER), the other one is kept with its operator. An UNDERWRITER RANGE that ends at the
+     * replaced REJECTED value moves with it, so the yellow zone still ends where the rejection starts.
      *
      * @param dto stopFactorId - id of the stop factor (its first version, ids 1..34 for the legacy ones)
      */
@@ -162,8 +163,12 @@ public class StopFactorServiceImpl implements StopFactorService {
     @Transactional
     public void saveCondition(StopFactorConditionDto dto) {
         StopFactorResponse current = stopFactorConsoleService.get(dto.stopFactorId());
+        Optional<ConditionDto> currentRejected = current.conditions().stream().filter(c -> c.result() == REJECTED).findFirst();
         List<ConditionDto> conditions = new ArrayList<>(current.conditions().stream()
                 .filter(c -> c.result() != dto.result())
+                .map(c -> endsAtReplacedRejected(c, dto, currentRejected)
+                        ? new ConditionDto(c.id(), c.result(), c.valueType(), c.value())
+                        : c)
                 .toList());
         conditions.add(new ConditionDto(null, dto.result(), dto.valueType(), dto.value()));
 
@@ -179,6 +184,16 @@ public class StopFactorServiceImpl implements StopFactorService {
                 conditions,
                 "Условие " + dto.result() + " изменено через StopFactorService.saveCondition"
         ), SPR_USER);
+    }
+
+    /** An UNDERWRITER RANGE up to the REJECTED value that saveCondition replaces. */
+    private static boolean endsAtReplacedRejected(ConditionDto condition, StopFactorConditionDto replacement,
+                                                  Optional<ConditionDto> currentRejected) {
+        return replacement.result() == REJECTED
+                && condition.operator() == ConditionOperator.RANGE
+                && currentRejected.isPresent()
+                && currentRejected.get().operator() == ConditionOperator.GT
+                && new BigDecimal(condition.valueTo()).compareTo(new BigDecimal(currentRejected.get().value())) == 0;
     }
 
     // ================================================================================================

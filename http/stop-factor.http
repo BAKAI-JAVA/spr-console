@@ -130,6 +130,8 @@ X-User: admin
 }
 
 ### Change a stop factor -> new version, the old one stays for history (orderNumber/active omitted = unchanged)
+# operator: GT, GTE, LT, LTE, EQ, RANGE (value..valueTo, value excluded), BETWEEN (both included), IN for statuses.
+# Left out, these thresholds are stored as REJECTED GT 8 and UNDERWRITER RANGE 6..8 ("7-8 - жёлтая зона").
 PUT http://localhost:9090/api/v1/admin/stop-factors/27
 Content-Type: application/json
 X-User: admin
@@ -143,6 +145,22 @@ X-User: admin
     { "result": "UNDERWRITER", "valueType": "INTEGER", "value": "6" }
   ],
   "changeReason": "Ужесточение порога"
+}
+
+### The same rule with explicit operators: 7-8 - жёлтая зона, 9 and more - отказ
+PUT http://localhost:9090/api/v1/admin/stop-factors/27
+Content-Type: application/json
+X-User: admin
+
+{
+  "metricId": 10,
+  "params": { "periodFromMonth": 1, "periodToMonth": 3, "minOverdueDays": 1, "maxOverdueDays": 10 },
+  "productIds": [],
+  "conditions": [
+    { "result": "REJECTED", "valueType": "INTEGER", "operator": "GTE", "value": "9" },
+    { "result": "UNDERWRITER", "valueType": "INTEGER", "operator": "BETWEEN", "value": "7", "valueTo": "8" }
+  ],
+  "changeReason": "Операторы"
 }
 
 ### Deactivate / activate (request params)

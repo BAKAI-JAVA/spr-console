@@ -1,8 +1,10 @@
 package kg.bakai.stopfactor.calculator;
 
-import java.math.BigDecimal;
 import java.util.List;
 
+/**
+ * What a calculator measured: a number, or the loan statuses of the client (values).
+ */
 public record CheckedValue(Double number, List<String> values) {
 
     public static CheckedValue ofNumber(double number) {
@@ -15,12 +17,5 @@ public record CheckedValue(Double number, List<String> values) {
 
     public boolean isNumber() {
         return number != null;
-    }
-
-    public String asString() {
-        if (number != null) {
-            return BigDecimal.valueOf(number).stripTrailingZeros().toPlainString();
-        }
-        return String.join(", ", values);
     }
 }

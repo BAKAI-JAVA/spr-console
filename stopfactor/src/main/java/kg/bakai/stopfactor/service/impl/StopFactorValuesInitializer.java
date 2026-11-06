@@ -2,6 +2,7 @@ package kg.bakai.stopfactor.service.impl;
 
 import kg.bakai.spr.core.kib.KibService;
 import kg.bakai.spr.core.kib.dto.ConsolidationDto;
+import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
 import kg.bakai.spr.core.kib.dto.LoanDto;
 import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
@@ -9,8 +10,10 @@ import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
 import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator;
+import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator.OverdueHistory;
 import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents;
-import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
+import kg.bakai.stopfactor.dto.scoring.LegacyCounters;
+import kg.bakai.stopfactor.dto.scoring.LegacyOverdueCounters;
 import kg.bakai.stopfactor.dto.scoring.ReportValues;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -25,7 +28,8 @@ import static java.time.temporal.ChronoUnit.MONTHS;
 
 /**
  * Turns the KIB and OB reports of an application into the values stop factors are checked with.
- * {@link #values} is the legacy StopFactorServiceImpl.initializeStopFactorIntegerValueDto, the logic is not changed.
+ * {@link #values} gives the values of the legacy StopFactorServiceImpl.initializeStopFactorIntegerValueDto, calculated
+ * the same way (LegacyStopFactorParityTest), with the fixed-period counters gathered in {@link LegacyCounters}.
  */
 @Component
 @RequiredArgsConstructor
@@ -39,51 +43,61 @@ class StopFactorValuesInitializer {
      * from OB is known, all other values are 0.
      */
     ReportValues values(CustomReport customReport, IndividualReport individualReport,
-                                     ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt,
-                                     LocalDate requestDate) {
+                        ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
         List<TotalDebtReportData> obCredits = totalDebt.getCredits();
-        long obOverdueDays = getMaxOverdueDays(obCredits);
-        double obOverdueSum = getOverdueSum(obCredits);
+        long obOverdueDays = maxOverdueDays(obCredits);
+        double obOverdueAmount = overdueAmount(obCredits);
 
         if (customReport == null || individualReport == null || consolidationDto == null) {
-            return new ReportValues(obOverdueDays, obOverdueSum);
+            return ReportValues.withoutKibReport(obOverdueDays, obOverdueAmount);
         }
 
-        CountOfChanges countOfChangesOb = getCountOfChangesOb(obCredits, requestDate);
-        var overdue = kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay());
+        GeneralInfoDto generalInfo = individualReport.generalInfoDto();
         return new ReportValues(
-                individualReport.generalInfoDto().numberOfActiveDisputes(),
-                individualReport.generalInfoDto().numberOfUnjustifiedDisputesInPast(),
-                getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
-                countOfChangesOb.countOfChangesObLast12Month(),
-                getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsFrom12To24Months),
-                countOfChangesOb.countOfChangesObFrom13To24Months(),
-                individualReport.generalInfoDto().creditInquiriesLast7Days(),
-                Math.max(getMaxOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getDaysDelay), obOverdueDays),
-                consolidationDto.totalOverduePrincipalOrInterestOnAllOpenCreditContracts().doubleValue() + obOverdueSum,
-                consolidationDto.totalNumberOfNewOpenLoansInTheLast30Days(),
+                generalInfo.numberOfActiveDisputes(),
+                generalInfo.numberOfUnjustifiedDisputesInPast(),
+                Math.max(maxOverOwnLoans(individualReport, LoanDto::getDaysDelay), obOverdueDays),
+                consolidationDto.totalOverduePrincipalOrInterestOnAllOpenCreditContracts().doubleValue() + obOverdueAmount,
                 consolidationDto.totalOpenCreditContracts(),
-                overdue
-        );
+                legacyCounters(customReport, individualReport, consolidationDto, obCredits, requestDate));
+    }
+
+    private LegacyCounters legacyCounters(CustomReport customReport, IndividualReport individualReport,
+                                          ConsolidationDto consolidationDto, List<TotalDebtReportData> obCredits,
+                                          LocalDate requestDate) {
+        ObChanges obChanges = obChanges(obCredits, requestDate);
+        return new LegacyCounters(
+                sumOverOwnLoans(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
+                sumOverOwnLoans(individualReport, LoanDto::getNumberOfRestructuringsFrom12To24Months),
+                obChanges.months1To12(),
+                obChanges.months13To24(),
+                individualReport.generalInfoDto().creditInquiriesLast7Days(),
+                consolidationDto.totalNumberOfNewOpenLoansInTheLast30Days(),
+                LegacyOverdueCounters.from(kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay())));
     }
 
     /**
      * Raw events of the credit history. For now only the overdue episodes, the other lists stay null and their
-     * stop factors use the legacy values.
+     * stop factors use the legacy counters.
      * <ul>
      *     <li>without a full KIB report the client has no credit history: no episodes, every overdue count is 0,
-     *     like the legacy values;</li>
+     *     like the legacy counters;</li>
      *     <li>the episodes cannot be built from the report (no payment calendars, null): null, the overdue stop
-     *     factors use the legacy counters.</li>
+     *     factors use the legacy counters;</li>
+     *     <li>the payment calendars do not reach the start of a contract: the episodes are used for the months they
+     *     cover only, longer periods use the legacy counters.</li>
      * </ul>
      */
     CreditHistoryEvents history(CustomReport customReport, IndividualReport individualReport,
                                 ConsolidationDto consolidationDto, LocalDate requestDate) {
         if (customReport == null || individualReport == null || consolidationDto == null) {
-            return new CreditHistoryEvents(List.of(), null, null, null);
+            return CreditHistoryEvents.ofOverdueEpisodes(List.of());
         }
-        List<OverdueEpisode> episodes = overdueEpisodeCalculator.getOverdueEpisodes(customReport, requestDate.atStartOfDay());
-        return episodes != null ? new CreditHistoryEvents(List.copyOf(episodes), null, null, null) : null;
+        OverdueHistory overdue = overdueEpisodeCalculator.getOverdueHistory(customReport, requestDate.atStartOfDay());
+        if (overdue == null) {
+            return null;
+        }
+        return new CreditHistoryEvents(List.copyOf(overdue.episodes()), overdue.completeMonths(), null, null, null);
     }
 
     /**
@@ -113,18 +127,19 @@ class StopFactorValuesInitializer {
     // KIB
     // ------------------------------------------------------------------------------------------------
 
-    private static int getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(IndividualReport individualReport, ToIntFunction<LoanDto> variableFunction) {
+    /** Sum of a value over the loans of the client as main debtor or guarantor. */
+    private static int sumOverOwnLoans(IndividualReport individualReport, ToIntFunction<LoanDto> value) {
         return individualReport.loanDtoList().stream()
                 .filter(StopFactorValuesInitializer::isMainDebtorOrGuarantor)
-                .mapToInt(variableFunction)
+                .mapToInt(value)
                 .sum();
     }
 
-    // The maximum starts from 0, as in legacy
-    private static int getMaxOfParamsWhereCustomerIsMainDebtorOrGuarantor(IndividualReport individualReport, ToIntFunction<LoanDto> variableFunction) {
+    /** Maximum of a value over the loans of the client as main debtor or guarantor, at least 0, as in legacy. */
+    private static int maxOverOwnLoans(IndividualReport individualReport, ToIntFunction<LoanDto> value) {
         int max = individualReport.loanDtoList().stream()
                 .filter(StopFactorValuesInitializer::isMainDebtorOrGuarantor)
-                .mapToInt(variableFunction)
+                .mapToInt(value)
                 .max()
                 .orElse(0);
         return Math.max(0, max);
@@ -134,12 +149,12 @@ class StopFactorValuesInitializer {
     // OB
     // ------------------------------------------------------------------------------------------------
 
-    private static long getMaxOverdueDays(List<TotalDebtReportData> credits) {
+    private static long maxOverdueDays(List<TotalDebtReportData> credits) {
         return credits.stream().mapToLong(TotalDebtReportData::getCurrentOverdueDaysCount).max().orElse(0);
     }
 
     // A credit without an overdue sum counts as 0
-    private static double getOverdueSum(List<TotalDebtReportData> credits) {
+    private static double overdueAmount(List<TotalDebtReportData> credits) {
         return credits.stream()
                 .map(TotalDebtReportData::getCurrentOverdueSum)
                 .filter(Objects::nonNull)
@@ -147,25 +162,24 @@ class StopFactorValuesInitializer {
                 .doubleValue();
     }
 
-    // Changes of OB credits by the months between the last change and the request; credits never changed are skipped
-    private static CountOfChanges getCountOfChangesOb(List<TotalDebtReportData> credits, LocalDate requestDate) {
-        int countOfChangesObLast12Month = 0;
-        int countOfChangesObFrom13To24Months = 0;
-
-        for (TotalDebtReportData item : credits) {
-            if (item.getLastChangeDate() == null) {
+    /** OB credits by the months between their last change and the request; credits never changed are skipped. */
+    private static ObChanges obChanges(List<TotalDebtReportData> credits, LocalDate requestDate) {
+        int months1To12 = 0;
+        int months13To24 = 0;
+        for (TotalDebtReportData credit : credits) {
+            if (credit.getLastChangeDate() == null) {
                 continue;
             }
-            long months = MONTHS.between(item.getLastChangeDate(), requestDate);
+            long months = MONTHS.between(credit.getLastChangeDate(), requestDate);
             if (months <= 12) {
-                countOfChangesObLast12Month++;
+                months1To12++;
             } else if (months <= 24) {
-                countOfChangesObFrom13To24Months++;
+                months13To24++;
             }
         }
-        return new CountOfChanges(countOfChangesObLast12Month, countOfChangesObFrom13To24Months);
+        return new ObChanges(months1To12, months13To24);
     }
 
-    private record CountOfChanges(int countOfChangesObLast12Month, int countOfChangesObFrom13To24Months) {
+    private record ObChanges(int months1To12, int months13To24) {
     }
 }

@@ -44,6 +44,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
                         calculator.type().getName(),
                         calculator.valueKind(),
                         new TreeSet<>(calculator.valueKind().conditionTypes()),
+                        calculator.valueKind().operators().stream().map(CalculatorDto.OperatorOption::of).toList(),
                         calculator.paramSpecs().stream()
                                 .map(spec -> new CalculatorDto.CalculatorParam(
                                         spec.key(),

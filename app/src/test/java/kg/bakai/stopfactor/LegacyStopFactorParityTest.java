@@ -85,7 +85,7 @@ class LegacyStopFactorParityTest {
         List<StopFactor> all = stopFactorRepository.findAll();
         assertThat(all).hasSize(34).allMatch(sf -> sf.getVersionNumber() == 1 && sf.getId() <= 34 && sf.getSegment() == null);
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
-        when(episodeCalculator.getOverdueEpisodes(any(), any())).thenReturn(null);
+        when(episodeCalculator.getOverdueHistory(any(), any())).thenReturn(null);
     }
 
     /**
@@ -185,7 +185,7 @@ class LegacyStopFactorParityTest {
     @Test
     void stopFactorAddedWithSaveIsChecked() {
         stopFactorService.save("Количество активных споров КИБ", "Добавлен через StopFactorService.save");
-        StopFactor added = stopFactorRepository.findAllActive().stream()
+        StopFactor added = stopFactorRepository.findCurrentActiveWithMetric().stream()
                 .filter(sf -> sf.getId() > 34)
                 .findFirst().orElseThrow();
         stopFactorService.saveCondition(new StopFactorConditionDto(added.getId(), "1", StopFactorValueTypes.INTEGER, UNDERWRITER));
@@ -344,6 +344,26 @@ class LegacyStopFactorParityTest {
     private record LegacyResult(StopFactorDecision decision, List<StopFactorCheck> checks) {
     }
 
+    /** Copy of the legacy value DTO the legacy algorithm reads. */
+    private record StopFactorIntegerValueDto(
+            double numberOfActiveDisputes,
+            double numberOfUnjustifiedDisputesInPast,
+            double numberOfRestructuringsLast12Months,
+            double countOfChangesObLast12Month,
+            double numberOfRestructuringsFrom12To24Months,
+            double countOfChangesObFrom13To24Months,
+            double creditInquiriesLast7Days,
+            double currentNumberOfDaysOverdue,
+            double currentAmountOfOverdue,
+            double totalNumberOfNewOpenLoansInTheLast30Days,
+            double totalOpenCreditContracts,
+            OverdueForStopFactor overdue
+    ) {
+        StopFactorIntegerValueDto(double currentNumberOfDaysOverdue, double currentAmountOfOverdue) {
+            this(0, 0, 0, 0, 0, 0, 0, currentNumberOfDaysOverdue, currentAmountOfOverdue, 0, 0, OverdueForStopFactor.NONE);
+        }
+    }
+
     /**
      * Copy of StopFactorLegacyServiceImpl, the logic is not changed. The only difference: check() returns the checks
      * instead of saving them, so they can be compared with the new service.
@@ -357,9 +377,9 @@ class LegacyStopFactorParityTest {
         ) {
             StopFactorStatus globalStopFactorStatus = APPROVED;
             InternalStatusCode internalStatusCode = null;
-            ReportValues reportValues = initializeStopFactorIntegerValueDto(customReport, individualReport, consolidationDto, totalDebt, requestDate);
+            StopFactorIntegerValueDto reportValues = initializeStopFactorIntegerValueDto(customReport, individualReport, consolidationDto, totalDebt, requestDate);
 
-            var stopFactors = stopFactorRepository.findAllActive();
+            var stopFactors = stopFactorRepository.findCurrentActiveWithMetric();
             List<StopFactorCheck> stopFactorChecks = new ArrayList<>();
 
             for (var s : stopFactors) {
@@ -388,7 +408,9 @@ class LegacyStopFactorParityTest {
 
         private StopFactorCheck getStopFactorCheck(long scoringId, IndividualReport individualReport, StopFactor s, StopFactorCheck stopFactorCheck, double count, StopFactorStatus expectedStatus) {
             StopFactorCondition condition;
-            var optionalCondition = stopFactorConditionRepository.findByStopFactor_IdAndResult(s.getId(), expectedStatus);
+            var optionalCondition = stopFactorConditionRepository.findAllByStopFactor_Id(s.getId()).stream()
+                    .filter(c -> c.getResult() == expectedStatus)
+                    .findFirst();
             if (optionalCondition.isPresent()) {
                 condition = optionalCondition.get();
                 if (condition.getValueType() == StopFactorValueTypes.ARRAY) {
@@ -414,7 +436,7 @@ class LegacyStopFactorParityTest {
             return stopFactorCheck;
         }
 
-        private double getVariableFunction(long stopFactorId, ReportValues dto) {
+        private double getVariableFunction(long stopFactorId, StopFactorIntegerValueDto dto) {
             return switch ((int) stopFactorId) {
                 case 1, 13, 14, 15, 16, 19 -> 0;
                 case 2 -> dto.numberOfActiveDisputes();
@@ -449,11 +471,11 @@ class LegacyStopFactorParityTest {
             };
         }
 
-        private ReportValues initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
+        private StopFactorIntegerValueDto initializeStopFactorIntegerValueDto(CustomReport customReport, IndividualReport individualReport, ConsolidationDto consolidationDto, TotalDebtFinalResponse totalDebt, LocalDate requestDate) {
             if (customReport != null && individualReport != null && consolidationDto != null) {
                 CountOfChanges countOfChangesOb = getCountOfChangesOb(totalDebt.getCredits(), requestDate);
                 var overdue = kibService.getOverdueByPeriodAndCount(customReport, requestDate.atStartOfDay());
-                return new ReportValues(
+                return new StopFactorIntegerValueDto(
                         individualReport.generalInfoDto().numberOfActiveDisputes(),
                         individualReport.generalInfoDto().numberOfUnjustifiedDisputesInPast(),
                         getSumOfParamsWhereCustomerIsMainDebtorOrGuarantor(individualReport, LoanDto::getNumberOfRestructuringsLast12Months),
@@ -470,7 +492,7 @@ class LegacyStopFactorParityTest {
                 );
             }
 
-            return new ReportValues(
+            return new StopFactorIntegerValueDto(
                     totalDebt.getCredits().stream().mapToLong(TotalDebtReportData::getCurrentOverdueDaysCount).max().orElse(0),
                     (totalDebt.getCredits().stream().map(credit -> Optional.ofNullable(credit.getCurrentOverdueSum()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add)).doubleValue()
             );
