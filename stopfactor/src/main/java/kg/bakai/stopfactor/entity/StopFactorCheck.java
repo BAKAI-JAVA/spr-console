@@ -1,8 +1,9 @@
 package kg.bakai.stopfactor.entity;
 
-import jakarta.persistence.*;
 import kg.bakai.common.entity.BaseEntity;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
+
+import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -27,8 +28,8 @@ public class StopFactorCheck extends BaseEntity {
     private Long productId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "stop_factor_id", nullable = false)
-    private StopFactor stopFactor;
+    @JoinColumn(name = "rule_id", nullable = false)
+    private StopFactorRule rule;
 
     @Column(name = "checked_value", nullable = false, length = Integer.MAX_VALUE)
     private String checkedValue;
@@ -37,10 +38,15 @@ public class StopFactorCheck extends BaseEntity {
     @Enumerated(EnumType.STRING)
     private StopFactorStatus result;
 
-    public StopFactorCheck(long scoringId, StopFactor stopFactor, String checkedValue) {
+    public StopFactorCheck(long scoringId, StopFactorRule rule, String checkedValue) {
         this.scoringId = scoringId;
-        this.stopFactor = stopFactor;
+        this.rule = rule;
         this.checkedValue = checkedValue;
         this.result = StopFactorStatus.APPROVED;
+    }
+
+    /** The stop factor version of the rule. */
+    public StopFactor getStopFactor() {
+        return rule.getStopFactor();
     }
 }

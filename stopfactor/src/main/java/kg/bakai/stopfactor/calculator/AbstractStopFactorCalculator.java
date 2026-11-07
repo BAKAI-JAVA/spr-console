@@ -1,5 +1,6 @@
 package kg.bakai.stopfactor.calculator;
 
+import kg.bakai.stopfactor.exception.InvalidParamsException;
 import java.math.BigDecimal;
 import java.util.*;
 

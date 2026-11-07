@@ -1,5 +1,7 @@
 package kg.bakai.stopfactor.calculator;
 
+import kg.bakai.stopfactor.calculator.CheckedValue;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -8,7 +10,7 @@ import java.util.function.Supplier;
 
 /**
  * The one rule of the counting calculators: count the raw events of the credit history when SPR provided them,
- * otherwise take the legacy counter ({@link kg.bakai.stopfactor.dto.scoring.LegacyCounters}) if there is one for
+ * otherwise take the legacy counter ({@link kg.bakai.stopfactor.report.LegacyCounters}) if there is one for
  * these params, otherwise there is no data.
  */
 final class EventCount {

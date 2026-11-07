@@ -1,7 +1,8 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
+import kg.bakai.stopfactor.enums.ValueKind;
 import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.stopfactor.report.StopFactorCheckRequest;
 
 import java.util.List;
 import java.util.Map;

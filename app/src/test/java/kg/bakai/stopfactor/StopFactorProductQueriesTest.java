@@ -1,14 +1,16 @@
 package kg.bakai.stopfactor;
 
 import kg.bakai.common.exception.BusinessValidationException;
-import kg.bakai.stopfactor.dto.console.ConditionDto;
-import kg.bakai.stopfactor.dto.console.StopFactorRequest;
-import kg.bakai.stopfactor.dto.console.StopFactorResponse;
+import kg.bakai.stopfactor.service.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.ConditionDto;
+import kg.bakai.stopfactor.dto.RuleDto;
+import kg.bakai.stopfactor.dto.StopFactorRequest;
+import kg.bakai.stopfactor.dto.StopFactorResponse;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import kg.bakai.stopfactor.repository.StopFactorRepository;
 import kg.bakai.stopfactor.repository.projection.ProductProjection;
-import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -102,8 +104,8 @@ class StopFactorProductQueriesTest {
 
     private static StopFactorRequest stopFactorRequest(Set<Long> productIds) {
         return new StopFactorRequest(ACTIVE_DISPUTES_METRIC, "Тест: активные споры по продукту", null, null, true,
-                Map.of(), productIds, null,
-                List.of(new ConditionDto(null, StopFactorStatus.REJECTED, StopFactorValueTypes.INTEGER, "0")),
+                productIds, null,
+                List.of(new RuleDto(Map.of(), List.of(new ConditionDto(null, StopFactorStatus.REJECTED, StopFactorValueTypes.INTEGER, "0")))),
                 null);
     }
 }

@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * DUMMY of the SPR class with the same name and package: "Contracts" of the KIB custom report (CreditinfoReportPlus).
- * Only what KibOverdueEpisodeCalculator reads, mapped from the KIB JSON names.
+ * Only what KibOverdueHistoryReader reads, mapped from the KIB JSON names.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Contracts(@JsonProperty("ContractList") ContractList contractList) {

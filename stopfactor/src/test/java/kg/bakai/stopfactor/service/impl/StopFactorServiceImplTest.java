@@ -1,40 +1,51 @@
 package kg.bakai.stopfactor.service.impl;
 
+import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.common.exception.BusinessValidationException;
 import kg.bakai.spr.core.kib.KibService;
 import kg.bakai.spr.core.kib.dto.ConsolidationDto;
 import kg.bakai.spr.core.kib.dto.GeneralInfoDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
 import kg.bakai.spr.core.kib.dto.LoanDto;
+import kg.bakai.spr.core.kib.dto.OverdueForStopFactor;
 import kg.bakai.spr.core.kib.dto.enums.LoanStatus;
 import kg.bakai.spr.core.kib.dto.enums.RoleOfClient;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.TotalDebtReportData;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
-import kg.bakai.stopfactor.calculator.*;
-import kg.bakai.stopfactor.calculator.KibOverdueEpisodeCalculator.OverdueHistory;
-import kg.bakai.stopfactor.evaluation.ConditionEvaluator;
-import kg.bakai.stopfactor.dto.console.ConditionDto;
-import kg.bakai.stopfactor.dto.console.StopFactorRequest;
-import kg.bakai.stopfactor.dto.console.StopFactorResponse;
-import kg.bakai.stopfactor.dto.scoring.*;
+import kg.bakai.spr.core.shared.InternalStatusCode;
+import kg.bakai.stopfactor.dto.StopFactorConditionDto;
+import kg.bakai.stopfactor.dto.StopFactorDecision;
+import kg.bakai.stopfactor.calculator.CalculatorRegistry;
+import kg.bakai.stopfactor.calculator.ParamSpec;
+import kg.bakai.stopfactor.config.CalculatorConfig;
+import kg.bakai.stopfactor.calculator.KibRefusalStatusesCalculator;
+import kg.bakai.stopfactor.calculator.OverdueBucketCountCalculator;
+import kg.bakai.stopfactor.calculator.RestructuringCountCalculator;
+import kg.bakai.stopfactor.condition.ConditionEvaluator;
+import kg.bakai.stopfactor.service.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.ConditionDto;
+import kg.bakai.stopfactor.dto.RuleDto;
+import kg.bakai.stopfactor.dto.StopFactorRequest;
+import kg.bakai.stopfactor.dto.StopFactorResponse;
 import kg.bakai.stopfactor.entity.StopFactor;
 import kg.bakai.stopfactor.entity.StopFactorCheck;
-import kg.bakai.stopfactor.entity.StopFactorCondition;
+import kg.bakai.stopfactor.entity.StopFactorRule;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import kg.bakai.stopfactor.enums.ConditionOperator;
-import kg.bakai.stopfactor.enums.InternalStatusCode;
-import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
 import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
-import kg.bakai.stopfactor.repository.StopFactorConditionRepository;
 import kg.bakai.stopfactor.repository.StopFactorMetricRepository;
 import kg.bakai.stopfactor.repository.StopFactorRepository;
 import kg.bakai.stopfactor.repository.projection.ProductProjection;
-import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
-import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.StopFactorProjection;
+import kg.bakai.stopfactor.report.CheckRequestFactory;
+import kg.bakai.stopfactor.report.CreditHistoryEvents;
+import kg.bakai.stopfactor.report.KibOverdueHistoryReader.OverdueHistory;
+import kg.bakai.stopfactor.report.KibOverdueHistoryReader;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -46,11 +57,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 
+import static kg.bakai.common.enums.ProductSegment.MSB;
+import static kg.bakai.common.enums.ProductSegment.RETAIL;
 import static kg.bakai.spr.core.kib.dto.enums.LoanStatus.*;
 import static kg.bakai.spr.core.kib.dto.enums.RoleOfClient.*;
 import static kg.bakai.stopfactor.enums.CalculatorType.*;
-import static kg.bakai.common.enums.ProductSegment.MSB;
-import static kg.bakai.common.enums.ProductSegment.RETAIL;
 import static kg.bakai.stopfactor.enums.StopFactorStatus.*;
 import static kg.bakai.stopfactor.enums.StopFactorValueTypes.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,7 +71,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests of the stop factor check, no database. Stop factors are built the way changelog 1.3 left them:
- * legacy ids 1..34 are version 1 with a metric and params. SPR returns no overdue episodes (null) unless a test
+ * legacy ids 1..34 are version 1 with a metric and params. SPR returns no overdue overdue months (null) unless a test
  * sets them, so overdue stop factors read the legacy counters.
  */
 class StopFactorServiceImplTest {
@@ -69,26 +80,25 @@ class StopFactorServiceImplTest {
     private static final LocalDate REQUEST_DATE = LocalDate.of(2026, 11, 3);
 
     private final StopFactorRepository stopFactorRepository = mock(StopFactorRepository.class);
-    private final StopFactorConditionRepository conditionRepository = mock(StopFactorConditionRepository.class);
     private final StopFactorCheckRepository checkRepository = mock(StopFactorCheckRepository.class);
     private final StopFactorMetricRepository metricRepository = mock(StopFactorMetricRepository.class);
     private final StopFactorConsoleService consoleService = mock(StopFactorConsoleService.class);
     private final KibService kibService = mock(KibService.class);
-    private final KibOverdueEpisodeCalculator episodeCalculator = mock(KibOverdueEpisodeCalculator.class);
+    private final KibOverdueHistoryReader overdueHistoryReader = mock(KibOverdueHistoryReader.class);
 
     private final List<StopFactor> activeStopFactors = new ArrayList<>();
-    private final List<StopFactorCondition> conditions = new ArrayList<>();
     private OverdueForStopFactor kibOverdue = overdue(0);
-    private List<CreditHistoryEvents.OverdueEpisode> kibEpisodes = null;
+    private List<CreditHistoryEvents.OverdueMonth> kibOverdueMonths = null;
     private Integer kibCompleteMonths = null;
 
     private StopFactorServiceImpl service;
+    private CalculatorRegistry registry;
 
     @BeforeEach
     void setUp() {
         // the calculators of CalculatorConfig + the @Component calculators, as in the application
         CalculatorConfig config = new CalculatorConfig();
-        CalculatorRegistry registry = new CalculatorRegistry(List.of(
+        registry = new CalculatorRegistry(List.of(
                 config.kibActiveDisputesCalculator(),
                 config.kibUnjustifiedDisputesCalculator(),
                 config.currentOverdueDaysCalculator(),
@@ -100,20 +110,14 @@ class StopFactorServiceImplTest {
                 new OverdueBucketCountCalculator(),
                 new RestructuringCountCalculator()
         ));
-        service = new StopFactorServiceImpl(stopFactorRepository, conditionRepository, checkRepository, metricRepository,
-                consoleService, new StopFactorValuesInitializer(kibService, episodeCalculator), registry);
+        service = new StopFactorServiceImpl(stopFactorRepository, checkRepository, metricRepository,
+                consoleService, new CheckRequestFactory(kibService, overdueHistoryReader), registry);
 
         when(stopFactorRepository.findCurrentActiveWithMetric()).thenReturn(activeStopFactors);
         when(stopFactorRepository.findProductByScoringId(anyLong())).thenReturn(Optional.empty());
         when(kibService.getOverdueByPeriodAndCount(any(), any())).thenAnswer(invocation -> kibOverdue);
-        when(episodeCalculator.getOverdueHistory(any(), any()))
-                .thenAnswer(invocation -> kibEpisodes != null ? new OverdueHistory(kibEpisodes, kibCompleteMonths) : null);
-        when(conditionRepository.findAllByStopFactor_IdIn(anyCollection())).thenAnswer(invocation -> {
-            Collection<Long> stopFactorIds = invocation.getArgument(0);
-            return conditions.stream()
-                    .filter(c -> stopFactorIds.contains(c.getStopFactor().getId()))
-                    .toList();
-        });
+        when(overdueHistoryReader.read(any(), any()))
+                .thenAnswer(invocation -> kibOverdueMonths != null ? new OverdueHistory(kibOverdueMonths, kibCompleteMonths) : null);
     }
 
     @Nested
@@ -141,7 +145,7 @@ class StopFactorServiceImplTest {
         void underwriterConditionIsCheckedOnlyWhenNotRejected() {
             // legacy stop factor 27: REJECTED > 9, UNDERWRITER > 6
             StopFactor bucket = stopFactor(27, OVERDUE_BUCKET_COUNT,
-                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 10));
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 15));
             condition(bucket, REJECTED, INTEGER, "9");
             condition(bucket, UNDERWRITER, INTEGER, "6");
 
@@ -323,7 +327,7 @@ class StopFactorServiceImplTest {
             condition(overdueDaysV2, REJECTED, INTEGER, "5");
 
             assertThat(check(new Application().obCredit(3, null, null))).isEqualTo(new StopFactorDecision(APPROVED, null));
-            verify(conditionRepository).findAllByStopFactor_IdIn(List.of(35L));
+            assertThat(savedChecks()).extracting(c -> c.getStopFactor().getId()).containsExactly(35L);
         }
 
         @Test
@@ -393,42 +397,42 @@ class StopFactorServiceImplTest {
     }
 
     @Nested
-    @DisplayName("Overdue episodes of the KIB payment calendars (KibOverdueEpisodeCalculator)")
-    class OverdueEpisodes {
+    @DisplayName("Overdue months of the KIB payment calendars (KibOverdueHistoryReader)")
+    class OverdueMonths {
 
         @Test
-        void episodesAreCountedForAnyPeriodAndRange() {
+        void overdueMonthsAreCountedForAnyPeriodAndRange() {
             // Retail 2026, months 7..12, 6..10 days: UNDERWRITER > 5, REJECTED > 8 - no legacy counter for it
             StopFactor bucket = stopFactor(200, OVERDUE_BUCKET_COUNT,
                     Map.of("periodFromMonth", 7, "periodToMonth", 12, "minOverdueDays", 6, "maxOverdueDays", 10));
             condition(bucket, REJECTED, INTEGER, "8");
             condition(bucket, UNDERWRITER, INTEGER, "5");
 
-            List<CreditHistoryEvents.OverdueEpisode> counted = List.of(
-                    episode(7, 6), episode(12, 10), episode(9, 8), episode(8, 7), episode(10, 9), episode(11, 6));
-            List<CreditHistoryEvents.OverdueEpisode> notCounted = List.of(
-                    episode(6, 8), episode(13, 8), episode(9, 5), episode(9, 11));
+            List<CreditHistoryEvents.OverdueMonth> counted = List.of(
+                    overdueMonth(7, 6), overdueMonth(12, 10), overdueMonth(9, 8), overdueMonth(8, 7), overdueMonth(10, 9), overdueMonth(11, 6));
+            List<CreditHistoryEvents.OverdueMonth> notCounted = List.of(
+                    overdueMonth(6, 8), overdueMonth(13, 8), overdueMonth(9, 5), overdueMonth(9, 11));
 
-            kibEpisodes = concat(counted.subList(0, 5), notCounted);
+            kibOverdueMonths = concat(counted.subList(0, 5), notCounted);
             assertThat(check(new Application()).status()).isEqualTo(APPROVED);
             assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("5.0");
 
-            kibEpisodes = concat(counted, notCounted);
+            kibOverdueMonths = concat(counted, notCounted);
             assertThat(check(new Application()).status()).isEqualTo(UNDERWRITER);
             assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo("6.0");
         }
 
         @Test
-        void episodesReplaceTheLegacyCounters() {
-            // legacy stop factor 27 reads "months 1-3, overdue 1-15" from the counters; with episodes it counts them
+        void overdueMonthsReplaceTheLegacyCounters() {
+            // legacy stop factor 27 (months 1-3, overdue 1-15) reads the KIB counter; with overdue months it counts them
             StopFactor bucket = stopFactor(27, OVERDUE_BUCKET_COUNT,
-                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 10));
+                    Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 1, "maxOverdueDays", 15));
             condition(bucket, REJECTED, INTEGER, "0");
             kibOverdue = overdue(10);
-            kibEpisodes = List.of();
+            kibOverdueMonths = List.of();
 
             assertThat(check(new Application()).status()).isEqualTo(APPROVED);
-            verify(episodeCalculator).getOverdueHistory(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
+            verify(overdueHistoryReader).read(any(CustomReport.class), eq(REQUEST_DATE.atStartOfDay()));
         }
 
         @Test
@@ -443,23 +447,23 @@ class StopFactorServiceImplTest {
         }
 
         @Test
-        void sprWithoutEpisodesSendsANewRangeToTheUnderwriter() {
+        void sprWithoutOverdueMonthsSendsANewRangeToTheUnderwriter() {
             StopFactor bucket = stopFactor(201, OVERDUE_BUCKET_COUNT,
                     Map.of("periodFromMonth", 1, "periodToMonth", 3, "minOverdueDays", 11, "maxOverdueDays", 20));
             condition(bucket, REJECTED, INTEGER, "0");
-            kibEpisodes = null;
+            kibOverdueMonths = null;
 
             assertThat(check(new Application())).isEqualTo(new StopFactorDecision(UNDERWRITER, null));
             assertThat(savedChecks().getFirst().getCheckedValue()).isEqualTo(StopFactorServiceImpl.NO_DATA);
         }
 
-        private static CreditHistoryEvents.OverdueEpisode episode(int monthsAgo, int maxOverdueDays) {
-            return new CreditHistoryEvents.OverdueEpisode(monthsAgo, maxOverdueDays);
+        private static CreditHistoryEvents.OverdueMonth overdueMonth(int monthsAgo, int maxOverdueDays) {
+            return new CreditHistoryEvents.OverdueMonth(monthsAgo, maxOverdueDays);
         }
 
-        private static List<CreditHistoryEvents.OverdueEpisode> concat(List<CreditHistoryEvents.OverdueEpisode> a,
-                                                                       List<CreditHistoryEvents.OverdueEpisode> b) {
-            List<CreditHistoryEvents.OverdueEpisode> all = new ArrayList<>(a);
+        private static List<CreditHistoryEvents.OverdueMonth> concat(List<CreditHistoryEvents.OverdueMonth> a,
+                                                                       List<CreditHistoryEvents.OverdueMonth> b) {
+            List<CreditHistoryEvents.OverdueMonth> all = new ArrayList<>(a);
             all.addAll(b);
             return all;
         }
@@ -570,7 +574,7 @@ class StopFactorServiceImplTest {
             service.save("Количество активных споров КИБ", "описание");
 
             verify(consoleService).create(new StopFactorRequest(2L, "Количество активных споров КИБ", "описание",
-                    null, true, Map.of(), Set.of(), null, List.of(), null), StopFactorServiceImpl.SPR_USER);
+                    null, true, Set.of(), null, List.of(new RuleDto(Map.of(), List.of())), null), StopFactorServiceImpl.SPR_USER);
         }
 
         @Test
@@ -584,9 +588,10 @@ class StopFactorServiceImplTest {
         @Test
         void saveConditionCreatesANewVersionReplacingTheConditionWithTheSameResult() {
             StopFactorResponse current = new StopFactorResponse(9, 9, 1, true, "Текущее количество дней просрочки", null,
-                    true, 9, 6, "Текущие дни просрочки", CURRENT_OVERDUE_DAYS, Map.of(), Set.of(5L), MSB,
-                    List.of(new ConditionDto(11L, REJECTED, INTEGER, "2", ConditionOperator.GT, null),
-                            new ConditionDto(12L, UNDERWRITER, INTEGER, "1", ConditionOperator.RANGE, "2")),
+                    true, 9, 6, "Текущие дни просрочки", CURRENT_OVERDUE_DAYS, Set.of(5L), MSB,
+                    List.of(new RuleDto(40L, "Текущее количество дней просрочки", Map.of(), List.of(
+                            new ConditionDto(11L, REJECTED, INTEGER, "2", ConditionOperator.GT, null),
+                            new ConditionDto(12L, UNDERWRITER, INTEGER, "1", ConditionOperator.RANGE, "2")))),
                     null, null, null, null, null);
             when(consoleService.get(9)).thenReturn(current);
 
@@ -595,7 +600,9 @@ class StopFactorServiceImplTest {
             ArgumentCaptor<StopFactorRequest> request = ArgumentCaptor.forClass(StopFactorRequest.class);
             verify(consoleService).update(eq(9L), request.capture(), eq(StopFactorServiceImpl.SPR_USER));
             // legacy knows only thresholds: the console sets UNDERWRITER RANGE 1..5 from the new REJECTED value
-            assertThat(request.getValue().conditions()).containsExactly(
+            assertThat(request.getValue().rules()).hasSize(1);
+            assertThat(request.getValue().rules().getFirst().name()).isEqualTo("Текущее количество дней просрочки");
+            assertThat(request.getValue().rules().getFirst().conditions()).containsExactly(
                     new ConditionDto(12L, UNDERWRITER, INTEGER, "1"),
                     new ConditionDto(null, REJECTED, INTEGER, "5"));
             assertThat(request.getValue().metricId()).isEqualTo(6L);
@@ -622,10 +629,13 @@ class StopFactorServiceImplTest {
     private StopFactor stopFactor(long id, CalculatorType calculator, Map<String, Object> params) {
         StopFactorMetric metric = new StopFactorMetric();
         metric.setCalculator(calculator);
+        metric.setParams(registry.get(calculator).paramSpecs().stream().map(ParamSpec::toSchema).toList());
         StopFactor stopFactor = new StopFactor("stop factor " + id, null);
         stopFactor.setId(id);
         stopFactor.setMetric(metric);
-        stopFactor.setParams(params);
+        StopFactorRule rule = stopFactor.addRule();
+        rule.setName("stop factor " + id);
+        rule.setParams(params);
         activeStopFactors.add(stopFactor);
         return stopFactor;
     }
@@ -643,19 +653,13 @@ class StopFactorServiceImplTest {
      * UNDERWRITER number with a REJECTED number is RANGE up to the REJECTED value.
      */
     private void condition(StopFactor stopFactor, StopFactorStatus result, StopFactorValueTypes type, String value) {
-        StopFactorCondition condition = new StopFactorCondition();
-        condition.setStopFactor(stopFactor);
-        condition.setResult(result);
-        condition.setValueType(type);
-        condition.setValue(value);
-        condition.setOperator(type == ARRAY || type == STRING ? ConditionOperator.IN : ConditionOperator.GT);
-        conditions.add(condition);
+        StopFactorRule rule = stopFactor.getRules().getFirst();
+        rule.addCondition(result, type, value, type == ARRAY || type == STRING ? ConditionOperator.IN : ConditionOperator.GT, null);
 
-        List<StopFactorCondition> own = conditions.stream().filter(c -> c.getStopFactor() == stopFactor).toList();
-        own.stream()
+        rule.getConditions().stream()
                 .filter(c -> c.getResult() == REJECTED && c.getOperator() == ConditionOperator.GT)
                 .findFirst()
-                .ifPresent(rejected -> own.stream()
+                .ifPresent(rejected -> rule.getConditions().stream()
                         .filter(c -> c.getResult() == UNDERWRITER && c.getOperator() != ConditionOperator.IN)
                         .forEach(underwriter -> {
                             underwriter.setOperator(ConditionOperator.RANGE);
@@ -671,8 +675,8 @@ class StopFactorServiceImplTest {
     }
 
     /** KIB overdue counts: only "months 1-3, overdue 1-15 days" (read by legacy stop factor 27) is set. */
-    private static OverdueForStopFactor overdue(int months1To3Overdue1To15) {
-        return new OverdueForStopFactor(months1To3Overdue1To15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    private static OverdueForStopFactor overdue(int months1To3Days1To15) {
+        return new OverdueForStopFactor(months1To3Days1To15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     private StopFactorDecision check(Application application) {

@@ -1,8 +1,12 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.scoring.ReportValues;
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
+import kg.bakai.stopfactor.calculator.CheckedValue;
+import kg.bakai.stopfactor.calculator.NoParams;
+import kg.bakai.stopfactor.calculator.ParameterlessCalculator;
+import kg.bakai.stopfactor.enums.ValueKind;
 import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.stopfactor.report.ReportValues;
+import kg.bakai.stopfactor.report.StopFactorCheckRequest;
 
 import java.util.Optional;
 import java.util.function.ToDoubleFunction;

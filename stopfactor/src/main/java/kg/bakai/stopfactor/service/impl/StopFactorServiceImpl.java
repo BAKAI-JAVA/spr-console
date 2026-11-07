@@ -6,30 +6,34 @@ import kg.bakai.spr.core.kib.dto.ConsolidationDto;
 import kg.bakai.spr.core.kib.dto.IndividualReport;
 import kg.bakai.spr.core.kib.dto.response.CustomReport;
 import kg.bakai.spr.core.ob.dto.response.TotalDebtFinalResponse;
+import kg.bakai.spr.core.shared.InternalStatusCode;
+import kg.bakai.stopfactor.dto.StopFactorConditionDto;
+import kg.bakai.stopfactor.dto.StopFactorDecision;
+import kg.bakai.stopfactor.service.StopFactorService;
 import kg.bakai.stopfactor.calculator.CalculatorRegistry;
 import kg.bakai.stopfactor.calculator.CheckedValue;
-import kg.bakai.stopfactor.dto.console.ConditionDto;
-import kg.bakai.stopfactor.dto.console.StopFactorRequest;
-import kg.bakai.stopfactor.dto.console.StopFactorResponse;
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
-import kg.bakai.stopfactor.dto.scoring.StopFactorConditionDto;
-import kg.bakai.stopfactor.dto.scoring.StopFactorDecision;
+import kg.bakai.stopfactor.calculator.StopFactorCalculator;
+import kg.bakai.stopfactor.condition.ConditionEvaluator;
+import kg.bakai.stopfactor.service.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.ConditionDto;
+import kg.bakai.stopfactor.dto.RuleDto;
+import kg.bakai.stopfactor.dto.StopFactorRequest;
+import kg.bakai.stopfactor.dto.StopFactorResponse;
 import kg.bakai.stopfactor.entity.StopFactor;
 import kg.bakai.stopfactor.entity.StopFactorCheck;
-import kg.bakai.stopfactor.entity.StopFactorCondition;
+import kg.bakai.stopfactor.entity.StopFactorRule;
 import kg.bakai.stopfactor.entity.StopFactorMetric;
 import kg.bakai.stopfactor.enums.CalculatorType;
 import kg.bakai.stopfactor.enums.ConditionOperator;
-import kg.bakai.stopfactor.enums.InternalStatusCode;
-import kg.bakai.stopfactor.evaluation.ConditionEvaluator;
 import kg.bakai.stopfactor.repository.StopFactorCheckRepository;
-import kg.bakai.stopfactor.repository.StopFactorConditionRepository;
 import kg.bakai.stopfactor.repository.StopFactorMetricRepository;
 import kg.bakai.stopfactor.repository.StopFactorRepository;
 import kg.bakai.stopfactor.repository.projection.ProductProjection;
-import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
-import kg.bakai.stopfactor.service.StopFactorService;
-import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.StopFactorProjection;
+import kg.bakai.stopfactor.report.CheckRequestFactory;
+import kg.bakai.stopfactor.report.ScoringReports;
+import kg.bakai.stopfactor.report.StopFactorCheckRequest;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,7 +47,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static kg.bakai.stopfactor.enums.StopFactorStatus.APPROVED;
 import static kg.bakai.stopfactor.enums.StopFactorStatus.REJECTED;
@@ -53,7 +56,7 @@ import static kg.bakai.stopfactor.enums.StopFactorStatus.UNDERWRITER;
  * Stop factor check of SPR, working with the versioned stop factors of changelog 1.3.
  * <ol>
  *     <li>the KIB / OB reports become a request: values, credit history, loan statuses
- *     ({@link StopFactorValuesInitializer});</li>
+ *     ({@link CheckRequestFactory});</li>
  *     <li>the active stop factors that apply to the scoring's product are taken ({@link StopFactor#appliesTo});</li>
  *     <li>for each one its calculator measures the value and its conditions decide ({@link ConditionEvaluator});
  *     a value that cannot be measured is {@link #NO_DATA} and goes to the underwriter;</li>
@@ -81,11 +84,10 @@ public class StopFactorServiceImpl implements StopFactorService {
             EnumSet.of(CalculatorType.CURRENT_OVERDUE_DAYS, CalculatorType.CURRENT_OVERDUE_AMOUNT);
 
     private final StopFactorRepository stopFactorRepository;
-    private final StopFactorConditionRepository stopFactorConditionRepository;
     private final StopFactorCheckRepository stopFactorCheckRepository;
     private final StopFactorMetricRepository stopFactorMetricRepository;
     private final StopFactorConsoleService stopFactorConsoleService;
-    private final StopFactorValuesInitializer stopFactorValuesInitializer;
+    private final CheckRequestFactory checkRequestFactory;
     private final CalculatorRegistry calculatorRegistry;
 
     // ================================================================================================
@@ -102,21 +104,24 @@ public class StopFactorServiceImpl implements StopFactorService {
         Optional<ProductProjection> product = stopFactorRepository.findProductByScoringId(scoringId);
         Long productId = product.map(ProductProjection::getId).orElse(null);
         ProductSegment segment = product.map(ProductProjection::getSegment).orElse(ProductSegment.DEFAULT);
-        StopFactorCheckRequest request = new StopFactorCheckRequest(scoringId, productId,
-                stopFactorValuesInitializer.values(customReport, individualReport, consolidationDto, totalDebt, requestDate),
-                stopFactorValuesInitializer.history(customReport, individualReport, consolidationDto, requestDate),
-                stopFactorValuesInitializer.loanStatuses(individualReport));
+        StopFactorCheckRequest request = checkRequestFactory.create(scoringId, productId,
+                new ScoringReports(customReport, individualReport, consolidationDto, totalDebt, requestDate));
 
         List<StopFactor> stopFactors = stopFactorRepository.findCurrentActiveWithMetric().stream()
                 .filter(stopFactor -> stopFactor.appliesTo(productId, segment))
                 .toList();
-        Map<Long, List<StopFactorCondition>> conditions = findConditions(stopFactors);
 
-        List<StopFactorCheck> checks = new ArrayList<>(stopFactors.size());
+        List<StopFactorCheck> checks = new ArrayList<>();
         for (StopFactor stopFactor : stopFactors) {
-            StopFactorCheck check = checkStopFactor(stopFactor, conditions.getOrDefault(stopFactor.getId(), List.of()), request);
-            check.setProductId(productId);
-            checks.add(check);
+            StopFactorCalculator<?> calculator = calculatorRegistry.get(stopFactor.getMetric().getCalculator());
+            for (StopFactorRule rule : stopFactor.getRules()) {
+                if (!rule.isActive()) {
+                    continue;
+                }
+                StopFactorCheck check = checkRule(rule, calculator, request);
+                check.setProductId(productId);
+                checks.add(check);
+            }
         }
 
         // A repeated check of the same scoring replaces its previous results instead of duplicating them
@@ -146,8 +151,8 @@ public class StopFactorServiceImpl implements StopFactorService {
         StopFactorMetric metric = stopFactorMetricRepository.findFirstByTitleOrNameTemplateOrderById(name, name)
                 .orElseThrow(() -> new BusinessValidationException("Метрика для стоп-фактора '" + name
                         + "' не найдена, создайте стоп-фактор в консоли с метрикой и параметрами"));
-        stopFactorConsoleService.create(new StopFactorRequest(
-                metric.getId(), name, description, null, true, Map.of(), Set.of(), null, List.of(), null), SPR_USER);
+        stopFactorConsoleService.create(new StopFactorRequest(metric.getId(), name, description, null, true, Set.of(), null,
+                List.of(new RuleDto(Map.of(), List.of())), null), SPR_USER);
     }
 
     /**
@@ -163,8 +168,13 @@ public class StopFactorServiceImpl implements StopFactorService {
     @Transactional
     public void saveCondition(StopFactorConditionDto dto) {
         StopFactorResponse current = stopFactorConsoleService.get(dto.stopFactorId());
-        Optional<ConditionDto> currentRejected = current.conditions().stream().filter(c -> c.result() == REJECTED).findFirst();
-        List<ConditionDto> conditions = new ArrayList<>(current.conditions().stream()
+        if (current.rules().size() != 1) {
+            throw new BusinessValidationException("Стоп-фактор " + dto.stopFactorId() + " состоит из " + current.rules().size()
+                    + " правил: условие правила меняется в консоли");
+        }
+        RuleDto rule = current.rules().getFirst();
+        Optional<ConditionDto> currentRejected = rule.conditions().stream().filter(c -> c.result() == REJECTED).findFirst();
+        List<ConditionDto> conditions = new ArrayList<>(rule.conditions().stream()
                 .filter(c -> c.result() != dto.result())
                 .map(c -> endsAtReplacedRejected(c, dto, currentRejected)
                         ? new ConditionDto(c.id(), c.result(), c.valueType(), c.value())
@@ -178,10 +188,9 @@ public class StopFactorServiceImpl implements StopFactorService {
                 current.description(),
                 current.orderNumber(),
                 current.active(),
-                current.params(),
                 current.productIds(),
                 current.segment(),
-                conditions,
+                List.of(new RuleDto(null, rule.name(), rule.params(), conditions, rule.active())),
                 "Условие " + dto.result() + " изменено через StopFactorService.saveCondition"
         ), SPR_USER);
     }
@@ -200,32 +209,19 @@ public class StopFactorServiceImpl implements StopFactorService {
     // Check of one application
     // ================================================================================================
 
-    /** Conditions of all checked stop factors in one query. */
-    private Map<Long, List<StopFactorCondition>> findConditions(List<StopFactor> stopFactors) {
-        if (stopFactors.isEmpty()) {
-            return Map.of();
-        }
-        return stopFactorConditionRepository.findAllByStopFactor_IdIn(stopFactors.stream().map(StopFactor::getId).toList())
-                .stream()
-                .collect(Collectors.groupingBy(condition -> condition.getStopFactor().getId()));
-    }
-
-    /** The calculator measures the value, the conditions decide. A value that cannot be measured is NO_DATA. */
-    private StopFactorCheck checkStopFactor(StopFactor stopFactor, List<StopFactorCondition> conditions,
-                                            StopFactorCheckRequest request) {
-        Optional<CheckedValue> value = calculatorRegistry.get(stopFactor.getMetric().getCalculator())
-                .bind(stopFactor.getParams())
-                .calculate(request);
+    /** The calculator measures the value with the params of the rule, its conditions decide. No value is NO_DATA. */
+    private static StopFactorCheck checkRule(StopFactorRule rule, StopFactorCalculator<?> calculator,
+                                             StopFactorCheckRequest request) {
+        Optional<CheckedValue> value = calculator.bind(rule.getParams()).calculate(request);
         if (value.isEmpty()) {
-            log.warn("Скоринг {}: нет данных для стоп-фактора {} '{}' ({} {}), заявка направлена андеррайтеру",
-                    request.scoringId(), stopFactor.getFactorId(), stopFactor.getName(),
-                    stopFactor.getMetric().getCalculator(), stopFactor.getParams());
-            StopFactorCheck check = new StopFactorCheck(request.scoringId(), stopFactor, NO_DATA);
+            log.warn("Скоринг {}: нет данных для правила '{}' стоп-фактора {} ({} {}), заявка направлена андеррайтеру",
+                    request.scoringId(), rule.getName(), rule.getStopFactor().getFactorId(), calculator.type(), rule.getParams());
+            StopFactorCheck check = new StopFactorCheck(request.scoringId(), rule, NO_DATA);
             check.setResult(UNDERWRITER);
             return check;
         }
-        ConditionEvaluator.Outcome outcome = ConditionEvaluator.apply(value.get(), conditions);
-        StopFactorCheck check = new StopFactorCheck(request.scoringId(), stopFactor, outcome.checkedValue());
+        ConditionEvaluator.Outcome outcome = ConditionEvaluator.apply(value.get(), rule.getConditions());
+        StopFactorCheck check = new StopFactorCheck(request.scoringId(), rule, outcome.checkedValue());
         check.setResult(outcome.result());
         return check;
     }

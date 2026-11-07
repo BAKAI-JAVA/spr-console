@@ -1,6 +1,14 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.scoring.*;
+import kg.bakai.spr.core.kib.dto.OverdueForStopFactor;
+import kg.bakai.stopfactor.calculator.CheckedValue;
+import kg.bakai.stopfactor.exception.InvalidParamsException;
+import kg.bakai.stopfactor.report.CreditHistoryEvents;
+import kg.bakai.stopfactor.report.LegacyCounters;
+import kg.bakai.stopfactor.report.LegacyOverdueCounters;
+import kg.bakai.stopfactor.report.ReportValues;
+import kg.bakai.stopfactor.report.StopFactorCheckRequest;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -38,16 +46,18 @@ class OverdueBucketCountCalculatorTest {
         return new ReportValues(0, 0, 0, 0, 0, legacy);
     }
 
-    private static StopFactorCheckRequest raw(List<CreditHistoryEvents.OverdueEpisode> episodes) {
+    private static StopFactorCheckRequest raw(List<CreditHistoryEvents.OverdueMonth> overdueMonths) {
         return new StopFactorCheckRequest(1L, null, ReportValues.withoutKibReport(0, 0),
-                CreditHistoryEvents.ofOverdueEpisodes(episodes), List.of());
+                CreditHistoryEvents.ofOverdueMonths(overdueMonths), List.of());
     }
 
     @Test
     void seededBucketReadsItsLegacyField() {
         OverdueForStopFactor overdue = new OverdueForStopFactor(9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3);
 
-        assertThat(calculator.calculate(parsed(1, 3, 1, 10), legacy(overdue))).contains(CheckedValue.ofNumber(9));
+        assertThat(calculator.calculate(parsed(1, 3, 1, 15), legacy(overdue))).contains(CheckedValue.ofNumber(9));
+        // the KIB module has no counter for 1-10 days in months 1..3
+        assertThat(calculator.calculate(parsed(1, 3, 1, 10), legacy(overdue))).isEqualTo(Optional.empty());
         assertThat(calculator.calculate(parsed(25, 36, 91, null), legacy(overdue))).contains(CheckedValue.ofNumber(3));
     }
 
@@ -57,15 +67,15 @@ class OverdueBucketCountCalculatorTest {
     }
 
     @Test
-    void rawEpisodesAreCountedInsidePeriodAndOverdueRangeInclusive() {
-        List<CreditHistoryEvents.OverdueEpisode> episodes = List.of(
-                new CreditHistoryEvents.OverdueEpisode(1, 1),
-                new CreditHistoryEvents.OverdueEpisode(3, 10),
-                new CreditHistoryEvents.OverdueEpisode(4, 5),
-                new CreditHistoryEvents.OverdueEpisode(2, 11));
+    void rawOverdueMonthsAreCountedInsidePeriodAndOverdueRangeInclusive() {
+        List<CreditHistoryEvents.OverdueMonth> overdueMonths = List.of(
+                new CreditHistoryEvents.OverdueMonth(1, 1),
+                new CreditHistoryEvents.OverdueMonth(3, 10),
+                new CreditHistoryEvents.OverdueMonth(4, 5),
+                new CreditHistoryEvents.OverdueMonth(2, 11));
 
-        assertThat(calculator.calculate(parsed(1, 3, 1, 10), raw(episodes))).contains(CheckedValue.ofNumber(2));
-        assertThat(calculator.calculate(parsed(1, 3, 11, null), raw(episodes))).contains(CheckedValue.ofNumber(1));
+        assertThat(calculator.calculate(parsed(1, 3, 1, 10), raw(overdueMonths))).contains(CheckedValue.ofNumber(2));
+        assertThat(calculator.calculate(parsed(1, 3, 11, null), raw(overdueMonths))).contains(CheckedValue.ofNumber(1));
     }
 
     @Test
@@ -73,17 +83,17 @@ class OverdueBucketCountCalculatorTest {
         OverdueForStopFactor overdue = new OverdueForStopFactor(9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         StopFactorCheckRequest request = new StopFactorCheckRequest(1L, null,
                 values(overdue),
-                CreditHistoryEvents.ofOverdueEpisodes(List.of()), List.of());
+                CreditHistoryEvents.ofOverdueMonths(List.of()), List.of());
 
         assertThat(calculator.calculate(parsed(1, 3, 1, 10), request)).contains(CheckedValue.ofNumber(0));
     }
 
     @Test
     void periodLongerThanTheCompleteHistoryUsesTheLegacyCounter() {
-        // the calendars cover 24 months: no episodes are known in months 25..36
+        // the calendars cover 24 months: no overdue months are known in months 25..36
         OverdueForStopFactor overdue = new OverdueForStopFactor(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4);
         StopFactorCheckRequest request = new StopFactorCheckRequest(1L, null, values(overdue),
-                new CreditHistoryEvents(List.of(new CreditHistoryEvents.OverdueEpisode(30, 120)), 24, null, null, null), List.of());
+                new CreditHistoryEvents(List.of(new CreditHistoryEvents.OverdueMonth(30, 120)), 24, null, null, null), List.of());
 
         assertThat(calculator.calculate(parsed(1, 24, 91, null), request)).contains(CheckedValue.ofNumber(0));
         assertThat(calculator.calculate(parsed(25, 36, 91, null), request)).contains(CheckedValue.ofNumber(4));

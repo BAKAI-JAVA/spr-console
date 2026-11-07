@@ -1,6 +1,6 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.console.MetricParamSchema;
+import kg.bakai.stopfactor.entity.MetricParamSchema;
 
 import java.util.Set;
 
@@ -18,6 +18,7 @@ public record ParamSpec(String key, String label, boolean required, int min, Set
         return allowedValues.isEmpty();
     }
 
+    /** The param as a metric stores it, for a metric created without params. */
     public MetricParamSchema toSchema() {
         return new MetricParamSchema(key, label, required);
     }

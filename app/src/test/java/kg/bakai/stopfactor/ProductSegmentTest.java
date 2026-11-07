@@ -4,12 +4,14 @@ import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.common.exception.NotFoundException;
 import kg.bakai.product.dto.ProductDto;
 import kg.bakai.product.service.ProductService;
-import kg.bakai.stopfactor.dto.console.ConditionDto;
-import kg.bakai.stopfactor.dto.console.StopFactorRequest;
-import kg.bakai.stopfactor.dto.console.StopFactorResponse;
+import kg.bakai.stopfactor.service.StopFactorConsoleService;
+import kg.bakai.stopfactor.dto.ConditionDto;
+import kg.bakai.stopfactor.dto.RuleDto;
+import kg.bakai.stopfactor.dto.StopFactorRequest;
+import kg.bakai.stopfactor.dto.StopFactorResponse;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
-import kg.bakai.stopfactor.service.console.StopFactorConsoleService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -157,8 +159,8 @@ class ProductSegmentTest {
 
     private static StopFactorRequest stopFactor(ProductSegment segment, String changeReason) {
         return new StopFactorRequest(ACTIVE_DISPUTES_METRIC, "Тест: активные споры, сегмент " + segment, null, null, true,
-                Map.of(), Set.of(), segment,
-                List.of(new ConditionDto(null, StopFactorStatus.REJECTED, StopFactorValueTypes.INTEGER, "0")),
+                Set.of(), segment,
+                List.of(new RuleDto(Map.of(), List.of(new ConditionDto(null, StopFactorStatus.REJECTED, StopFactorValueTypes.INTEGER, "0")))),
                 changeReason);
     }
 }

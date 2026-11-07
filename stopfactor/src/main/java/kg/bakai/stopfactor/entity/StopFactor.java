@@ -3,16 +3,15 @@ package kg.bakai.stopfactor.entity;
 import jakarta.persistence.*;
 import kg.bakai.common.entity.BaseEntity;
 import kg.bakai.common.enums.ProductSegment;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 
 @Getter
@@ -60,9 +59,11 @@ public class StopFactor extends BaseEntity {
     @JoinColumn(name = "metric_id", nullable = false)
     private StopFactorMetric metric;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "params", columnDefinition = "jsonb", nullable = false)
-    private Map<String, Object> params = new HashMap<>();
+    /** The rules of this version, in order. */
+    @Setter(AccessLevel.NONE)
+    @OneToMany(mappedBy = "stopFactor", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("orderNumber")
+    private List<StopFactorRule> rules = new ArrayList<>();
 
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(
@@ -97,6 +98,18 @@ public class StopFactor extends BaseEntity {
         return segmentMatches && productMatches;
     }
 
+    /** Removes every rule, to set the rules of a new version anew. */
+    public void removeRules() {
+        rules.clear();
+    }
+
+    /** Adds a rule after the existing ones. */
+    public StopFactorRule addRule() {
+        StopFactorRule rule = new StopFactorRule(this, rules.size() + 1);
+        rules.add(rule);
+        return rule;
+    }
+
     public Long getFactorId() {
         return rootId != null ? rootId : id;
     }
@@ -112,7 +125,7 @@ public class StopFactor extends BaseEntity {
         next.isActive = this.isActive;
         next.orderNumber = this.orderNumber;
         next.metric = this.metric;
-        next.params = new HashMap<>(this.params);
+        this.rules.forEach(rule -> next.rules.add(rule.copyTo(next)));
         next.productIds = new HashSet<>(this.productIds);
         next.segment = this.segment;
         return next;

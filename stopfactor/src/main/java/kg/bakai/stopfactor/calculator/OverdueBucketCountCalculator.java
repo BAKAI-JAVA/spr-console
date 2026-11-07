@@ -1,8 +1,13 @@
 package kg.bakai.stopfactor.calculator;
 
-import kg.bakai.stopfactor.dto.scoring.CreditHistoryEvents.OverdueEpisode;
-import kg.bakai.stopfactor.dto.scoring.StopFactorCheckRequest;
+import kg.bakai.stopfactor.calculator.AbstractStopFactorCalculator;
+import kg.bakai.stopfactor.calculator.CheckedValue;
+import kg.bakai.stopfactor.calculator.ParamSpec;
+import kg.bakai.stopfactor.enums.ValueKind;
 import kg.bakai.stopfactor.enums.CalculatorType;
+import kg.bakai.stopfactor.report.CreditHistoryEvents.OverdueMonth;
+import kg.bakai.stopfactor.report.StopFactorCheckRequest;
+
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -10,8 +15,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Count of continuous overdue episodes in a period of months whose maximum overdue is in a range of days
- * (both bounds included). Without episodes, or when they do not cover the whole period: the legacy counter with
+ * Count of months with overdue (main debtor contracts) in a period of months whose overdue is in a range of days
+ * (both bounds included). Without overdue months, or when they do not cover the whole period: the legacy counter with
  * exactly these params, if there is one.
  */
 @Component
@@ -27,10 +32,10 @@ public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator<O
      */
     public record Bucket(int periodFrom, int periodTo, int minOverdue, Integer maxOverdue) {
 
-        boolean contains(OverdueEpisode episode) {
-            return episode.monthsAgo() >= periodFrom && episode.monthsAgo() <= periodTo
-                    && episode.maxOverdueDays() >= minOverdue
-                    && (maxOverdue == null || episode.maxOverdueDays() <= maxOverdue);
+        boolean contains(OverdueMonth month) {
+            return month.monthsAgo() >= periodFrom && month.monthsAgo() <= periodTo
+                    && month.maxOverdueDays() >= minOverdue
+                    && (maxOverdue == null || month.maxOverdueDays() <= maxOverdue);
         }
     }
     @Override
@@ -71,9 +76,9 @@ public class OverdueBucketCountCalculator extends AbstractStopFactorCalculator<O
     @Override
     public Optional<CheckedValue> calculate(Bucket bucket, StopFactorCheckRequest request) {
         return EventCount.count(
-                request.history() != null ? request.history().overdueEpisodesUpTo(bucket.periodTo()) : null,
+                request.history() != null ? request.history().overdueMonthsUpTo(bucket.periodTo()) : null,
                 bucket::contains,
-                () -> request.values().legacy().overdueEpisodes()
+                () -> request.values().legacy().overdueMonths()
                         .count(bucket.periodFrom(), bucket.periodTo(), bucket.minOverdue(), bucket.maxOverdue()));
     }
 }

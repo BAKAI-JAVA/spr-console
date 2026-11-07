@@ -1,6 +1,7 @@
 package kg.bakai.stopfactor.calculator;
 
 import kg.bakai.stopfactor.enums.CalculatorType;
+
 import org.springframework.stereotype.Component;
 
 import java.util.*;

@@ -8,7 +8,7 @@ GET http://localhost:9090/api/v1/test/stop-factor-check/scenarios
 ### Run a scenario (asExpected shows whether the decision matches)
 POST http://localhost:9090/api/v1/test/stop-factor-check/scenarios/msb-same-history-yellow
 
-### Overdue history: 6 episodes of 5 days in months 1..3 -> Retail REJECTED (try scoringId 5 = MSB -> UNDERWRITER)
+### Overdue history: 6 overdue months of 5 days in months 1..3 -> Retail REJECTED (try scoringId 5 = MSB -> UNDERWRITER)
 POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
@@ -16,16 +16,17 @@ Content-Type: application/json
   "scoringId": 1,
   "kib": {
     "loans": [ { "role": "MainDebtor", "status": "Open" } ],
-    "overdueEpisodes": [
+    "overdueMonths": [
       { "monthsAgo": 1, "maxOverdueDays": 5 }, { "monthsAgo": 2, "maxOverdueDays": 5 }, { "monthsAgo": 2, "maxOverdueDays": 3 },
       { "monthsAgo": 3, "maxOverdueDays": 7 }, { "monthsAgo": 3, "maxOverdueDays": 10 }, { "monthsAgo": 3, "maxOverdueDays": 1 }
     ]
   }
 }
 
-### Raw KIB payment calendars -> KibOverdueEpisodeCalculator builds the episodes (as in SPR)
-# MainDebtor: 4 -> 12 days, paid -> 1 episode, max 12, month 1 (OK). Guarantor: 25 days 5 months ago -> REJECTED.
-# CoDebtor contracts are not counted.
+### Raw KIB payment calendars -> KibOverdueHistoryReader finds the months with overdue (as the KIB module)
+# One entry per month, as KIB sends it: maxPastDueDays - largest overdue in the month, pastDueDays - left at its end.
+# MainDebtor: 4 days in September, 12 in October -> 2 months (OK); 25 days in June -> months 4..6, 21+ days -> REJECTED.
+# Guarantor and CoDebtor contracts are not counted.
 POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
@@ -36,13 +37,15 @@ Content-Type: application/json
   "kib": {
     "contracts": [
       { "role": "MainDebtor", "calendar": [
-          { "date": "2026-09-10", "pastDueDays": 4 }, { "date": "2026-10-10", "pastDueDays": 12 }, { "date": "2026-11-01", "pastDueDays": 0 } ] },
-      { "role": "Guarantor", "calendar": [
-          { "date": "2026-06-15", "pastDueDays": 25 }, { "date": "2026-07-15", "pastDueDays": 0 } ] },
-      { "role": "CoDebtor", "calendar": [ { "date": "2026-10-01", "pastDueDays": 40 } ] }
+          { "date": "2026-09-30", "maxPastDueDays": 4, "pastDueDays": 4 },
+          { "date": "2026-10-31", "maxPastDueDays": 12, "pastDueDays": 0 } ] },
+      { "role": "MainDebtor", "calendar": [ { "date": "2026-06-30", "maxPastDueDays": 25, "pastDueDays": 0 } ] },
+      { "role": "Guarantor", "calendar": [ { "date": "2026-10-31", "maxPastDueDays": 90, "pastDueDays": 0 } ] },
+      { "role": "CoDebtor", "calendar": [ { "date": "2026-10-31", "maxPastDueDays": 40, "pastDueDays": 0 } ] }
     ]
   }
 }
+
 
 ### Product relation: 3 open credits by Ипотека -> test stop factor of Ипотека/Автокредит -> UNDERWRITER
 POST http://localhost:9090/api/v1/test/stop-factor-check
@@ -68,11 +71,11 @@ Content-Type: application/json
 
 { "scoringId": 1, "kib": { "activeDisputes": 2, "missingParts": ["CONSOLIDATION"] } }
 
-### Missing data: SPR could not build the overdue episodes -> new ranges NO_DATA -> UNDERWRITER
+### Missing data: SPR could not build the overdue overdue months -> new ranges NO_DATA -> UNDERWRITER
 POST http://localhost:9090/api/v1/test/stop-factor-check
 Content-Type: application/json
 
-{ "scoringId": 1, "kib": { "episodesUnavailable": true } }
+{ "scoringId": 1, "kib": { "calendarsUnavailable": true } }
 
 ### Missing data: scoring without product -> RETAIL, product limits ignored
 POST http://localhost:9090/api/v1/test/stop-factor-check
@@ -110,65 +113,136 @@ GET http://localhost:9090/api/v1/admin/stop-factors?active=true
 GET http://localhost:9090/api/v1/admin/stop-factors?active=true&segment=MSB
 
 ### One stop factor / its version history
-GET http://localhost:9090/api/v1/admin/stop-factors/27
+GET http://localhost:9090/api/v1/admin/stop-factors/13
 
 ###
-GET http://localhost:9090/api/v1/admin/stop-factors/27/versions
+GET http://localhost:9090/api/v1/admin/stop-factors/13/versions
 
-### Create a stop factor (name is rendered from the metric template when omitted)
+### Create a stop factor with several rules: one metric, each rule its own params and conditions.
+# A rule name left out is the metric's name template with the params; the stop factor name, the metric title.
 POST http://localhost:9090/api/v1/admin/stop-factors
 Content-Type: application/json
 X-User: admin
 
 {
   "metricId": 10,
-  "params": { "periodFromMonth": 1, "periodToMonth": 6, "minOverdueDays": 30 },
+  "description": "Кредитный комитет",
   "productIds": [1],
   "segment": "RETAIL",
-  "conditions": [ { "result": "REJECTED", "valueType": "INTEGER", "value": "0" } ],
+  "rules": [
+    {
+      "params": { "periodFromMonth": 1, "periodToMonth": 6, "minOverdueDays": 30, "maxOverdueDays": 60 },
+      "conditions": [ { "result": "REJECTED", "valueType": "INTEGER", "value": "0" } ]
+    },
+    {
+      "params": { "periodFromMonth": 7, "periodToMonth": 12, "minOverdueDays": 30 },
+      "conditions": [ { "result": "UNDERWRITER", "valueType": "INTEGER", "value": "0" } ]
+    }
+  ],
   "changeReason": "Новое правило кредитного комитета"
 }
 
-### Change a stop factor -> new version, the old one stays for history (orderNumber/active omitted = unchanged)
+### Change a stop factor -> new version with all its rules, the old one stays for history
+# (orderNumber/active omitted = unchanged). A stop factor with one rule: "rules" has one element.
 # operator: GT, GTE, LT, LTE, EQ, RANGE (value..valueTo, value excluded), BETWEEN (both included), IN for statuses.
-# Left out, these thresholds are stored as REJECTED GT 8 and UNDERWRITER RANGE 6..8 ("7-8 - жёлтая зона").
-PUT http://localhost:9090/api/v1/admin/stop-factors/27
+# Left out, these thresholds are stored as REJECTED GT 30 and UNDERWRITER RANGE 0..30.
+PUT http://localhost:9090/api/v1/admin/stop-factors/9
 Content-Type: application/json
 X-User: admin
 
 {
-  "metricId": 10,
-  "params": { "periodFromMonth": 1, "periodToMonth": 3, "minOverdueDays": 1, "maxOverdueDays": 10 },
+  "metricId": 6,
   "productIds": [],
-  "conditions": [
-    { "result": "REJECTED", "valueType": "INTEGER", "value": "8" },
-    { "result": "UNDERWRITER", "valueType": "INTEGER", "value": "6" }
+  "rules": [
+    {
+      "params": {},
+      "conditions": [
+        { "result": "REJECTED", "valueType": "INTEGER", "value": "30" },
+        { "result": "UNDERWRITER", "valueType": "INTEGER", "value": "0" }
+      ]
+    }
   ],
-  "changeReason": "Ужесточение порога"
+  "changeReason": "Текущая просрочка до 30 дней - андеррайтер"
 }
 
-### The same rule with explicit operators: 7-8 - жёлтая зона, 9 and more - отказ
-PUT http://localhost:9090/api/v1/admin/stop-factors/27
+### The same with explicit operators: 1-30 days - underwriter, more than 30 - reject
+PUT http://localhost:9090/api/v1/admin/stop-factors/9
 Content-Type: application/json
 X-User: admin
 
 {
-  "metricId": 10,
-  "params": { "periodFromMonth": 1, "periodToMonth": 3, "minOverdueDays": 1, "maxOverdueDays": 10 },
+  "metricId": 6,
   "productIds": [],
-  "conditions": [
-    { "result": "REJECTED", "valueType": "INTEGER", "operator": "GTE", "value": "9" },
-    { "result": "UNDERWRITER", "valueType": "INTEGER", "operator": "BETWEEN", "value": "7", "valueTo": "8" }
+  "rules": [
+    {
+      "params": {},
+      "conditions": [
+        { "result": "REJECTED", "valueType": "INTEGER", "operator": "GT", "value": "30" },
+        { "result": "UNDERWRITER", "valueType": "INTEGER", "operator": "BETWEEN", "value": "1", "valueTo": "30" }
+      ]
+    }
   ],
   "changeReason": "Операторы"
 }
 
+### Turn one rule off: send the rules with "active": false on it (a new version, the rule is kept but not checked)
+
 ### Deactivate / activate (request params)
-PATCH http://localhost:9090/api/v1/admin/stop-factors/27/status?active=false&changeReason=Временно отключен
+PATCH http://localhost:9090/api/v1/admin/stop-factors/9/status?active=false&changeReason=Временно отключен
 X-User: admin
 
 ### Display order: every current stop factor id in the new order
 PUT http://localhost:9090/api/v1/admin/stop-factors/order
 Content-Type: application/json
 
-[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 27, 28, 29, 30, 31, 32, 17, 18, 33, 34, 20, 21, 22, 23, 24, 25, 26, 13, 14, 15, 16, 19]
+[1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 54, 55, 57, 58]
+
+### ------------------------------------------------------------------------------------------------
+### Rules and conditions of the current version. Each change is a new version: rule ids change,
+### take them from the response (or GET the rules again). changeReason is required.
+### ------------------------------------------------------------------------------------------------
+
+### Delete a stop factor (its versions stay in the history)
+DELETE http://localhost:9090/api/v1/admin/stop-factors/9?changeReason=Больше не используется
+X-User: admin
+
+### Rules of a stop factor
+GET http://localhost:9090/api/v1/admin/stop-factors/4/rules
+
+### One rule
+GET http://localhost:9090/api/v1/admin/stop-factors/4/rules/4
+
+### Add a rule (name left out: rendered from the params)
+POST http://localhost:9090/api/v1/admin/stop-factors/4/rules?changeReason=Период 25-36 месяцев
+Content-Type: application/json
+X-User: admin
+
+{ "params": { "source": "KIB", "periodFromMonth": 25, "periodToMonth": 36 },
+  "conditions": [ { "result": "REJECTED", "valueType": "INTEGER", "value": "2", "operator": "GT" } ] }
+
+### Replace a rule (name, params, conditions, active)
+PUT http://localhost:9090/api/v1/admin/stop-factors/4/rules/4?changeReason=Правило отключено
+Content-Type: application/json
+X-User: admin
+
+{ "params": { "source": "KIB", "periodFromMonth": 1, "periodToMonth": 12 },
+  "conditions": [ { "result": "REJECTED", "valueType": "INTEGER", "value": "0" } ],
+  "active": false }
+
+### Remove a rule (not the only one)
+DELETE http://localhost:9090/api/v1/admin/stop-factors/4/rules/4?changeReason=Правило не нужно
+X-User: admin
+
+### Conditions of a rule
+GET http://localhost:9090/api/v1/admin/stop-factors/4/rules/4/conditions
+
+### Set the UNDERWRITER condition of a rule (replaces the existing one of that result)
+PUT http://localhost:9090/api/v1/admin/stop-factors/4/rules/4/conditions?changeReason=Жёлтая зона
+Content-Type: application/json
+X-User: admin
+
+{ "result": "UNDERWRITER", "valueType": "INTEGER", "value": "0", "operator": "RANGE", "valueTo": "1" }
+
+### Remove the UNDERWRITER condition of a rule
+DELETE http://localhost:9090/api/v1/admin/stop-factors/4/rules/4/conditions/UNDERWRITER?changeReason=Без жёлтой зоны
+X-User: admin

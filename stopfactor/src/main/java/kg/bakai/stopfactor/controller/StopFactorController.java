@@ -1,9 +1,10 @@
 package kg.bakai.stopfactor.controller;
 
+import kg.bakai.stopfactor.service.StopFactorService;
+import kg.bakai.stopfactor.dto.StopFactorProjection;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import kg.bakai.stopfactor.repository.projection.StopFactorProjection;
-import kg.bakai.stopfactor.service.StopFactorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

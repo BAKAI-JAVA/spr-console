@@ -1,17 +1,23 @@
 package kg.bakai.stopfactor.entity;
 
-import jakarta.persistence.*;
 import kg.bakai.common.entity.BaseEntity;
-import jakarta.validation.constraints.NotNull;
 import kg.bakai.stopfactor.enums.ConditionOperator;
 import kg.bakai.stopfactor.enums.StopFactorStatus;
 import kg.bakai.stopfactor.enums.StopFactorValueTypes;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * A condition of a rule: REJECTED or UNDERWRITER when the measured value fits the operator.
+ */
 @Getter
 @Setter
 @Entity
+@NoArgsConstructor
 @Table(name = "stop_factor_condition", schema = "stop_factors")
 public class StopFactorCondition extends BaseEntity {
     @Id
@@ -21,8 +27,8 @@ public class StopFactorCondition extends BaseEntity {
 
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "stop_factor_id", nullable = false)
-    private StopFactor stopFactor;
+    @JoinColumn(name = "rule_id", nullable = false, updatable = false)
+    private StopFactorRule rule;
 
     @NotNull
     @Column(name = "value", nullable = false, length = Integer.MAX_VALUE)
@@ -46,4 +52,13 @@ public class StopFactorCondition extends BaseEntity {
     @Enumerated(EnumType.STRING)
     private StopFactorStatus result;
 
+    StopFactorCondition(StopFactorRule rule, StopFactorStatus result, StopFactorValueTypes valueType, String value,
+                        ConditionOperator operator, String valueTo) {
+        this.rule = rule;
+        this.result = result;
+        this.valueType = valueType;
+        this.value = value;
+        this.operator = operator;
+        this.valueTo = valueTo;
+    }
 }

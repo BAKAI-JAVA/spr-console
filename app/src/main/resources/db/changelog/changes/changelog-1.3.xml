@@ -38,7 +38,7 @@
                 <constraints nullable="false"/>
             </column>
         </createTable>
-        <!-- Keep in sync with kg.bakai.stopfactor.enums.CalculatorType -->
+        <!-- Keep in sync with kg.bakai.stopfactor.domain.enums.CalculatorType -->
         <sql>
             ALTER TABLE stop_factors.stop_factor_metric
                 ADD CONSTRAINT ck_stop_factor_metric_calculator CHECK (calculator IN (
@@ -123,7 +123,10 @@
     </changeSet>
 
     <!--
-        Every existing stop factor gets its metric and params, derived from its name.
+        Every existing stop factor gets its metric and params, derived from its name (as in production).
+        The overdue params are the ranges of the KIB counter each legacy stop factor reads
+        (KibOverdueCalculator: months 1..3 and 4..6 by 1-15 / 16-30 / 31+ days, 7..12 and 13..24 by
+        1-10 / 11-20 / 21-30 / 31+, 25..36 by 1-60 / 61-90 / 91+); #13-#16 and #19 read no counter.
         If the database holds a stop factor that is not listed here, the NOT NULL step below fails
         and the whole migration stops instead of leaving a stop factor without a metric.
     -->
@@ -154,24 +157,24 @@
                 (14, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 8}'),
                 (15, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 1,  "maxOverdueDays": 7}'),
                 (16, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 8}'),
-                (17, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 1,  "maxOverdueDays": 4}'),
-                (18, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 5,  "maxOverdueDays": 14}'),
+                (17, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 1,  "maxOverdueDays": 10}'),
+                (18, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 11, "maxOverdueDays": 20}'),
                 (19, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 15}'),
-                (20, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 1,  "maxOverdueDays": 7}'),
-                (21, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 8,  "maxOverdueDays": 20}'),
+                (20, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 1,  "maxOverdueDays": 10}'),
+                (21, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 11, "maxOverdueDays": 20}'),
                 (22, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 21, "maxOverdueDays": 30}'),
                 (23, 10, '{"periodFromMonth": 13, "periodToMonth": 24, "minOverdueDays": 31}'),
-                (24, 10, '{"periodFromMonth": 25, "periodToMonth": 36, "minOverdueDays": 1,  "maxOverdueDays": 29}'),
-                (25, 10, '{"periodFromMonth": 25, "periodToMonth": 36, "minOverdueDays": 30, "maxOverdueDays": 90}'),
+                (24, 10, '{"periodFromMonth": 25, "periodToMonth": 36, "minOverdueDays": 1,  "maxOverdueDays": 60}'),
+                (25, 10, '{"periodFromMonth": 25, "periodToMonth": 36, "minOverdueDays": 61, "maxOverdueDays": 90}'),
                 (26, 10, '{"periodFromMonth": 25, "periodToMonth": 36, "minOverdueDays": 91}'),
-                (27, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 1,  "maxOverdueDays": 10}'),
-                (28, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 11, "maxOverdueDays": 15}'),
-                (29, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 16}'),
-                (30, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 1,  "maxOverdueDays": 10}'),
-                (31, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 11, "maxOverdueDays": 15}'),
-                (32, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 16}'),
-                (33, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 15, "maxOverdueDays": 20}'),
-                (34, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 21}')
+                (27, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 1,  "maxOverdueDays": 15}'),
+                (28, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 16, "maxOverdueDays": 30}'),
+                (29, 10, '{"periodFromMonth": 1,  "periodToMonth": 3,  "minOverdueDays": 31}'),
+                (30, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 1,  "maxOverdueDays": 15}'),
+                (31, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 16, "maxOverdueDays": 30}'),
+                (32, 10, '{"periodFromMonth": 4,  "periodToMonth": 6,  "minOverdueDays": 31}'),
+                (33, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 21, "maxOverdueDays": 30}'),
+                (34, 10, '{"periodFromMonth": 7,  "periodToMonth": 12, "minOverdueDays": 31}')
             ) AS m(stop_factor_id, metric_id, params)
             WHERE sf.id = m.stop_factor_id;
         </sql>

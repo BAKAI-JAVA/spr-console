@@ -11,8 +11,8 @@
             only to products of that segment. Existing products become RETAIL, the two MSB products are set by name.
           * common limits: new versions of #11 (new credits in 30 days, reject from 4) and
             #12 (open credits, reject from 8)
-          * overdue history: the active overdue stop factors #17..#34 get an inactive version, 28 new
-            OVERDUE_BUCKET_COUNT stop factors replace them, 14 per segment
+          * overdue history: the active overdue stop factors #17..#34 get an inactive version; the rules that
+            replace them (14 per segment) are created in changelog 1.7, once a stop factor can have several rules
 
         Decisions taken where the business answer was missing (change by a console edit or a new changelog):
           * a product in neither list is RETAIL (stricter of the two for 1..10 days, safer than no rules at all);
@@ -20,12 +20,12 @@
           * "меньше 7 - Ок, 8-10 - жёлтая зона": 7 is OK, 11 and more rejects
           * MSB, months 1..6, 11..20 days: 3 and more rejects, as for Retail
           * "Жёлтая зона" is UNDERWRITER
-          * an overdue episode belongs to the month its maximum overdue was reached and is counted once
-            (contract of KibService.getOverdueEpisodes in SPR)
+          * the count is of payment calendar months with overdue of the main debtor contracts, as the KIB module
+            counts its legacy counters (KibOverdueCalculator); an overdue going on into the next month counts in both
 
         Conditions fire when count > value, so "1 - Ок, 2 - жёлтая зона, 3+ - отказ" is UNDERWRITER 1, REJECTED 2.
-        The new rules need the overdue episodes from SPR: without them every new range returns NO_DATA and the
-        application goes to the underwriter.
+        The new rules need the KIB payment calendars (KibOverdueHistoryReader): without them every new range
+        returns NO_DATA and the application goes to the underwriter.
     -->
 
     <!-- A constant default does not rewrite the table (PostgreSQL 11+); it only fills the existing rows -->
@@ -155,99 +155,6 @@ BEGIN
         WHERE COALESCE(root_id, id) = r.root_id AND valid_to = r.valid_from;
     END LOOP;
 END $$;
-            ]]></sql>
-        </rollback>
-    </changeSet>
-
-    <!--
-        Thresholds: a condition fires when the count of episodes is greater than its value.
-        Ranges "без ограничений" get no stop factor.
-    -->
-    <changeSet id="1.4.4" author="aaltynbek">
-        <comment>Create the overdue history stop factors of Retail and MSB</comment>
-        <sql splitStatements="false"><![CDATA[
-DO $$
-DECLARE
-    metric     BIGINT;
-    next_order INT;
-    r          RECORD;
-    sf_id      BIGINT;
-BEGIN
-    SELECT id INTO metric FROM stop_factors.stop_factor_metric
-    WHERE calculator = 'OVERDUE_BUCKET_COUNT' ORDER BY id LIMIT 1;
-    IF metric IS NULL THEN
-        RAISE EXCEPTION 'Metric OVERDUE_BUCKET_COUNT not found';
-    END IF;
-    SELECT COALESCE(MAX(order_number), 0) INTO next_order FROM stop_factors.stop_factor WHERE valid_to IS NULL;
-
-    FOR r IN
-        SELECT * FROM (VALUES
-            --                months    overdue days  UNDERWRITER  REJECTED
-            ( 1, 'RETAIL',  1,  3,  1, 10::int, NULL::int,  5),
-            ( 2, 'RETAIL',  1,  3, 11, 20,       1,          2),
-            ( 3, 'RETAIL',  1,  3, 21, NULL,     NULL,       0),
-            ( 4, 'RETAIL',  4,  6,  1, 10,       NULL,       5),
-            ( 5, 'RETAIL',  4,  6, 11, 20,       1,          2),
-            ( 6, 'RETAIL',  4,  6, 21, NULL,     NULL,       0),
-            ( 7, 'RETAIL',  7, 12,  6, 10,       5,          8),
-            ( 8, 'RETAIL',  7, 12, 11, 20,       0,          1),
-            ( 9, 'RETAIL',  7, 12, 21, NULL,     NULL,       0),
-            (10, 'RETAIL', 13, 24, 11, 20,       7,         10),
-            (11, 'RETAIL', 13, 24, 21, 30,       0,          1),
-            (12, 'RETAIL', 13, 24, 31, NULL,     NULL,       0),
-            (13, 'RETAIL', 25, 36, 31, 60,       0,          1),
-            (14, 'RETAIL', 25, 36, 61, NULL,     NULL,       0),
-            (15, 'MSB',     1,  3,  1, 10,       5,         10),
-            (16, 'MSB',     1,  3, 11, 20,       1,          2),
-            (17, 'MSB',     1,  3, 21, NULL,     NULL,       0),
-            (18, 'MSB',     4,  6,  1, 10,       5,         10),
-            (19, 'MSB',     4,  6, 11, 20,       1,          2),
-            (20, 'MSB',     4,  6, 21, NULL,     NULL,       0),
-            (21, 'MSB',     7, 12, 11, 20,       7,         10),
-            (22, 'MSB',     7, 12, 21, 30,       0,          1),
-            (23, 'MSB',     7, 12, 31, NULL,     NULL,       0),
-            (24, 'MSB',    13, 24, 11, 20,       7,         10),
-            (25, 'MSB',    13, 24, 21, 30,       0,          1),
-            (26, 'MSB',    13, 24, 31, NULL,     NULL,       0),
-            (27, 'MSB',    25, 36, 31, 60,       0,          1),
-            (28, 'MSB',    25, 36, 61, NULL,     NULL,       0)
-        ) AS t(n, segment, period_from, period_to, min_days, max_days, underwriter_above, rejected_above)
-        ORDER BY n
-    LOOP
-        sf_id := nextval('stop_factors.stop_factor_id_generator');
-        next_order := next_order + 1;
-
-        -- the name is the metric's name template rendered with the params, as the console does
-        INSERT INTO stop_factors.stop_factor (id, created_date, name, description, is_active, order_number,
-                                              version_number, valid_from, change_reason, created_by, metric_id, params, segment)
-        VALUES (sf_id, now(),
-                format('Количество непрерывной просроченной задолженности по основному долгу и/или процентам с %s по %s месяц, где максимальная просрочка >= %s',
-                       r.period_from, r.period_to, r.min_days)
-                    || CASE WHEN r.max_days IS NOT NULL THEN ' и <= ' || r.max_days ELSE '' END,
-                CASE r.segment WHEN 'RETAIL' THEN 'Розница и ИФЦ' ELSE 'МСБ' END,
-                true, next_order, 1, now(), 'Правила по просрочкам 2026', 'migration', metric,
-                jsonb_strip_nulls(jsonb_build_object(
-                        'periodFromMonth', r.period_from, 'periodToMonth', r.period_to,
-                        'minOverdueDays', r.min_days, 'maxOverdueDays', r.max_days)),
-                r.segment);
-
-        INSERT INTO stop_factors.stop_factor_condition (id, created_date, stop_factor_id, value, value_type, result)
-        VALUES (nextval('stop_factors.stop_factor_condition_id_generator'), now(), sf_id, r.rejected_above::text, 'INTEGER', 'REJECTED');
-
-        IF r.underwriter_above IS NOT NULL THEN
-            INSERT INTO stop_factors.stop_factor_condition (id, created_date, stop_factor_id, value, value_type, result)
-            VALUES (nextval('stop_factors.stop_factor_condition_id_generator'), now(), sf_id, r.underwriter_above::text, 'INTEGER', 'UNDERWRITER');
-        END IF;
-    END LOOP;
-END $$;
-        ]]></sql>
-        <rollback>
-            <sql><![CDATA[
-                DELETE FROM stop_factors.stop_factor_condition
-                WHERE stop_factor_id IN (SELECT id FROM stop_factors.stop_factor
-                                         WHERE created_by = 'migration' AND change_reason = 'Правила по просрочкам 2026');
-                DELETE FROM stop_factors.stop_factor
-                WHERE created_by = 'migration' AND change_reason = 'Правила по просрочкам 2026';
             ]]></sql>
         </rollback>
     </changeSet>

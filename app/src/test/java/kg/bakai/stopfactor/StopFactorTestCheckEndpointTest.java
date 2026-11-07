@@ -1,10 +1,11 @@
 package kg.bakai.stopfactor;
 
-import kg.bakai.stopfactor.testcheck.StopFactorTestCheckService;
-import kg.bakai.stopfactor.testcheck.TestCheckRequest;
-import kg.bakai.stopfactor.testcheck.TestCheckResponse;
-import kg.bakai.stopfactor.testcheck.TestCheckScenario;
-import kg.bakai.stopfactor.testcheck.TestCheckScenarioResult;
+import kg.bakai.stopfactor.service.StopFactorTestCheckService;
+import kg.bakai.stopfactor.dto.TestCheckRequest;
+import kg.bakai.stopfactor.dto.TestCheckResponse;
+import kg.bakai.stopfactor.dto.TestCheckScenario;
+import kg.bakai.stopfactor.dto.TestCheckScenarioResult;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -107,8 +108,8 @@ class StopFactorTestCheckEndpointTest {
     }
 
     @Test
-    void episodesUnavailableSendNewRangesToTheUnderwriterAsNoData() {
-        TestCheckResponse result = testCheckService.runScenario("overdue-episodes-unavailable").result();
+    void overdueMonthsUnavailableSendNewRangesToTheUnderwriterAsNoData() {
+        TestCheckResponse result = testCheckService.runScenario("kib-calendars-unavailable").result();
 
         assertThat(result.decision()).isEqualTo(UNDERWRITER);
         assertThat(result.checks()).anyMatch(c -> "NO_DATA".equals(c.getCheckedValue()));
@@ -132,7 +133,7 @@ class StopFactorTestCheckEndpointTest {
         mockMvc.perform(post("/api/v1/test/stop-factor-check")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "scoringId": 3, "kib": { "openCredits": 3, "overdueEpisodes": [ { "monthsAgo": 2, "maxOverdueDays": 12 } ] } }
+                                { "scoringId": 3, "kib": { "openCredits": 3, "overdueMonths": [ { "monthsAgo": 2, "maxOverdueDays": 12 } ] } }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.productName").value("Ипотека"))
@@ -170,7 +171,7 @@ class StopFactorTestCheckEndpointTest {
                 .andExpect(jsonPath(examples + "['full-application'].summary").value("full-application → APPROVED"))
                 .andExpect(jsonPath(examples + "['full-application'].value.scoringId").value(-100))
                 .andExpect(jsonPath(examples + "['full-application'].value.requestDate").value("2026-11-04"))
-                .andExpect(jsonPath(examples + "['full-application'].value.kib.overdueEpisodes[1].maxOverdueDays").value(12))
+                .andExpect(jsonPath(examples + "['full-application'].value.kib.overdueMonths[1].maxOverdueDays").value(12))
                 .andExpect(jsonPath(examples + "['missing-kib-report'].value.kib").doesNotExist())
                 .andExpect(jsonPath(examples + "['current-overdue-451'].summary").value("current-overdue-451 → REJECTED _451"));
     }

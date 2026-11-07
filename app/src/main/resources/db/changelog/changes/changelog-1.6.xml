@@ -14,7 +14,7 @@
 
         Every result stays the same: the REJECTED condition is checked first, so an UNDERWRITER condition never fired
         above the REJECTED value; RANGE only writes that down.
-        Keep in sync with kg.bakai.stopfactor.enums.ConditionOperator.
+        Keep in sync with kg.bakai.stopfactor.domain.enums.ConditionOperator.
     -->
 
     <changeSet id="1.6.0" author="aaltynbek">

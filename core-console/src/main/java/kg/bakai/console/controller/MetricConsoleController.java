@@ -1,11 +1,12 @@
 package kg.bakai.console.controller;
 
+import kg.bakai.stopfactor.service.MetricConsoleService;
+import kg.bakai.stopfactor.dto.CalculatorDto;
+import kg.bakai.stopfactor.dto.MetricDto;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import kg.bakai.stopfactor.dto.console.CalculatorDto;
-import kg.bakai.stopfactor.dto.console.MetricDto;
-import kg.bakai.stopfactor.service.console.MetricConsoleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;

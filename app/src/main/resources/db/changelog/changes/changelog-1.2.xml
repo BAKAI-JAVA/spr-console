@@ -7,11 +7,16 @@
 
     <!--
         1.2 - data:
-          * stop_factor, stop_factor_condition backfilled from data/stop-factor.csv, data/stop-factor-condition.csv
+          * stop_factor, stop_factor_condition backfilled from data/stop-factor.csv, data/stop-factor-condition.csv:
+            a copy of the SPR production tables (stop factors 1..34, conditions 2..42); skipped where they have rows
           * 5 test products and 5 test scorings (one per product)
     -->
 
     <changeSet id="1.2.0" author="aaltynbek">
+        <!-- SPR production already holds this data: the load is only for an empty table -->
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT count(*) FROM stop_factors.stop_factor</sqlCheck>
+        </preConditions>
         <comment>Backfill stop_factors.stop_factor from CSV</comment>
         <loadData schemaName="stop_factors" tableName="stop_factor"
                   file="data/stop-factor.csv" relativeToChangelogFile="false"
@@ -27,6 +32,10 @@
     </changeSet>
 
     <changeSet id="1.2.1" author="aaltynbek">
+        <!-- SPR production already holds this data: the load is only for an empty table -->
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT count(*) FROM stop_factors.stop_factor_condition</sqlCheck>
+        </preConditions>
         <comment>Backfill stop_factors.stop_factor_condition from CSV</comment>
         <loadData schemaName="stop_factors" tableName="stop_factor_condition"
                   file="data/stop-factor-condition.csv" relativeToChangelogFile="false"

@@ -1,8 +1,9 @@
 package kg.bakai.stopfactor.repository;
 
-import jakarta.persistence.LockModeType;
 import kg.bakai.stopfactor.entity.StopFactor;
 import kg.bakai.stopfactor.repository.projection.ProductProjection;
+
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -55,6 +56,14 @@ public interface StopFactorRepository extends JpaRepository<StopFactor, Long> {
     List<StopFactor> findCurrentByMetricId(long metricId);
 
     boolean existsByMetric_Id(long metricId);
+
+    /** Whether a rule of any version of a stop factor of this metric has a value of this param. */
+    @Query(value = """
+            SELECT EXISTS (SELECT 1 FROM stop_factors.stop_factor_rule r
+                           JOIN stop_factors.stop_factor sf ON sf.id = r.stop_factor_id
+                           WHERE sf.metric_id = :metricId AND jsonb_exists(r.params, :key))
+            """, nativeQuery = true)
+    boolean isParamUsed(long metricId, String key);
 
     /**
      * Product of the application being scored. Empty if the scoring has no product (legacy scorings) -
