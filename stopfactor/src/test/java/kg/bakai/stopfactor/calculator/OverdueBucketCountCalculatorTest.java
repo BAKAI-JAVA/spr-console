@@ -107,11 +107,11 @@ class OverdueBucketCountCalculatorTest {
 
         assertThatThrownBy(() -> calculator.normalizeParams(Map.of("periodFromMonth", 6, "periodToMonth", 3, "minOverdueDays", 1)))
                 .isInstanceOf(InvalidParamsException.class)
-                .hasMessageContaining("Параметр 'periodFromMonth' должен быть <= 'periodToMonth'");
+                .hasMessageContaining("не может быть больше «Период по (месяц)»");
         assertThatThrownBy(() -> calculator.normalizeParams(Map.of("periodFromMonth", 1.5, "periodToMonth", 3, "foo", 1)))
                 .isInstanceOf(InvalidParamsException.class)
-                .hasMessageContaining("Неизвестный параметр 'foo'")
-                .hasMessageContaining("Параметр 'periodFromMonth' должен быть целым числом")
-                .hasMessageContaining("Параметр 'minOverdueDays' обязателен");
+                .hasMessageContaining("Параметр «foo» не используется этой метрикой")
+                .hasMessageContaining("«Период с (месяц)» должно быть целым числом")
+                .hasMessageContaining("Укажите «Максимальная просрочка от (дней)»");
     }
 }

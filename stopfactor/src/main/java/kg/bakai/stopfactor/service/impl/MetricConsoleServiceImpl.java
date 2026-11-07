@@ -9,6 +9,7 @@ import kg.bakai.stopfactor.calculator.ParamSpec;
 import kg.bakai.stopfactor.calculator.StopFactorCalculator;
 import kg.bakai.stopfactor.service.MetricConsoleService;
 import kg.bakai.stopfactor.util.NameTemplateRenderer;
+import kg.bakai.stopfactor.util.Sentences;
 import kg.bakai.stopfactor.dto.CalculatorDto;
 import kg.bakai.stopfactor.dto.MetricDto;
 import kg.bakai.stopfactor.entity.MetricParamSchema;
@@ -99,7 +100,7 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
     public MetricDto update(long id, MetricDto request) {
         StopFactorMetric metric = find(id);
         if (request.calculator() != metric.getCalculator()) {
-            throw new BusinessValidationException("calculator: калькулятор нельзя изменить, создайте новую метрику");
+            throw new BusinessValidationException("Калькулятор метрики изменить нельзя. Для другого калькулятора создайте новую метрику.");
         }
         String title = request.title().trim();
         requireUniqueTitle(title, id);
@@ -112,7 +113,8 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
             for (StopFactorRule rule : stopFactor.getRules()) {
                 List<String> ruleErrors = new ArrayList<>();
                 validator.validateParams(metric.getCalculator(), title, params, rule.getParams(), ruleErrors);
-                ruleErrors.forEach(e -> errors.add("Стоп-фактор " + stopFactor.getFactorId() + ", правило " + rule.getOrderNumber() + ": " + e));
+                ruleErrors.forEach(e -> errors.add("Стоп-фактор №" + stopFactor.getFactorId() + ", правило " + rule.getOrderNumber()
+                        + ": " + Sentences.lowerFirst(e)));
             }
         }
         if (!errors.isEmpty()) {
@@ -135,7 +137,8 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
     public void delete(long id) {
         StopFactorMetric metric = find(id);
         if (stopFactorRepository.existsByMetric_Id(id)) {
-            throw new ConflictException("Метрика " + id + " используется стоп-факторами и не может быть удалена, деактивируйте ее");
+            throw new ConflictException("Метрику «" + metric.getTitle() + "» нельзя удалить: на неё ссылаются стоп-факторы, в том числе"
+                    + " прежние версии. Отключите метрику вместо удаления.");
         }
         metricRepository.delete(metric);
         log.info("Метрика {} '{}' удалена", id, metric.getTitle());
@@ -149,10 +152,10 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
         Set<String> keys = new HashSet<>();
         for (MetricParamSchema param : params) {
             if (!keys.add(param.key())) {
-                errors.add("params: ключ '" + param.key() + "' повторяется");
+                errors.add("Параметр «" + param.key() + "» указан несколько раз.");
             } else if (!specs.containsKey(param.key())) {
-                errors.add("params: '" + param.key() + "' не поддерживается калькулятором " + calculator.type()
-                        + ", поддерживаются: " + new TreeSet<>(specs.keySet()));
+                errors.add("Калькулятор «" + calculator.type().getName() + "» не поддерживает параметр «" + param.key()
+                        + "». Доступные параметры: " + String.join(", ", new TreeSet<>(specs.keySet())) + ".");
             }
         }
         specs.values().stream()
@@ -163,14 +166,16 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
                         .ifPresentOrElse(
                                 p -> {
                                     if (!p.required()) {
-                                        errors.add("params: '" + spec.key() + "' должен быть обязательным для " + calculator.type());
+                                        errors.add("Параметр «" + spec.label() + "» обязателен для калькулятора «"
+                                                + calculator.type().getName() + "» и не может быть необязательным.");
                                     }
                                 },
-                                () -> errors.add("params: '" + spec.key() + "' обязателен для " + calculator.type())));
+                                () -> errors.add("Калькулятор «" + calculator.type().getName() + "» требует параметр «"
+                                        + spec.label() + "»: верните его в список параметров.")));
 
         NameTemplateRenderer.placeholders(nameTemplate).stream()
                 .filter(key -> !keys.contains(key))
-                .forEach(key -> errors.add("nameTemplate: {" + key + "} не является параметром этой метрики"));
+                .forEach(key -> errors.add("Шаблон названия содержит {" + key + "}, но у метрики нет такого параметра."));
 
         if (!errors.isEmpty()) {
             throw new BusinessValidationException(errors);
@@ -186,8 +191,8 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
                 .filter(key -> stopFactorRepository.isParamUsed(metric.getId(), key))
                 .toList();
         if (!used.isEmpty()) {
-            throw new BusinessValidationException("params: " + used + " заданы у стоп-факторов этой метрики (в том числе "
-                    + "у прежних версий) и не могут быть удалены");
+            throw new BusinessValidationException("Параметры " + String.join(", ", used) + " нельзя убрать: они заданы в правилах"
+                    + " стоп-факторов этой метрики, в том числе в прежних версиях.");
         }
     }
 
@@ -202,12 +207,12 @@ public class MetricConsoleServiceImpl implements MetricConsoleService {
         boolean taken = metricRepository.findAll().stream()
                 .anyMatch(m -> !m.getId().equals(exceptId) && m.getTitle().equalsIgnoreCase(title));
         if (taken) {
-            throw new ConflictException("Метрика '" + title + "' уже существует");
+            throw new ConflictException("Метрика с названием «" + title + "» уже существует.");
         }
     }
 
     private StopFactorMetric find(long id) {
-        return metricRepository.findById(id).orElseThrow(() -> new NotFoundException("Метрика " + id + " не найдена"));
+        return metricRepository.findById(id).orElseThrow(() -> new NotFoundException("Метрика с id " + id + " не найдена."));
     }
 
     private MetricDto toDto(StopFactorMetric metric) {

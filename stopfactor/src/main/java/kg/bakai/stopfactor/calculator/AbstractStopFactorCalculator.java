@@ -19,30 +19,31 @@ public abstract class AbstractStopFactorCalculator<P> implements StopFactorCalcu
 
         source.keySet().stream()
                 .filter(key -> !specs.containsKey(key))
-                .forEach(key -> errors.add("Неизвестный параметр '" + key + "'"));
+                .forEach(key -> errors.add("Параметр «" + key + "» не используется этой метрикой."));
 
         Map<String, Object> normalized = new LinkedHashMap<>();
         for (ParamSpec spec : specs.values()) {
             Object raw = source.get(spec.key());
             if (raw == null || (raw instanceof String s && s.isBlank())) {
                 if (spec.required()) {
-                    errors.add("Параметр '" + spec.key() + "' обязателен");
+                    errors.add("Укажите «" + spec.label() + "».");
                 }
                 continue;
             }
             if (spec.isInteger()) {
                 Integer value = toInteger(raw);
                 if (value == null) {
-                    errors.add("Параметр '" + spec.key() + "' должен быть целым числом");
+                    errors.add("«" + spec.label() + "» должно быть целым числом.");
                 } else if (value < spec.min()) {
-                    errors.add("Параметр '" + spec.key() + "' должен быть >= " + spec.min());
+                    errors.add("«" + spec.label() + "» должно быть не меньше " + spec.min() + ".");
                 } else {
                     normalized.put(spec.key(), value);
                 }
             } else {
                 String value = raw.toString().trim();
                 if (!spec.allowedValues().contains(value)) {
-                    errors.add("Параметр '" + spec.key() + "' должен быть одним из " + new TreeSet<>(spec.allowedValues()));
+                    errors.add("«" + spec.label() + "»: допустимые значения — "
+                            + String.join(", ", new TreeSet<>(spec.allowedValues())) + ".");
                 } else {
                     normalized.put(spec.key(), value);
                 }
@@ -60,12 +61,17 @@ public abstract class AbstractStopFactorCalculator<P> implements StopFactorCalcu
     protected void validateNormalized(Map<String, Object> params, List<String> errors) {
     }
 
-    protected static void requireOrdered(Map<String, Object> params, String fromKey, String toKey, List<String> errors) {
+    /** A period or range given by two params: the start may not be after the end. */
+    protected void requireOrdered(Map<String, Object> params, String fromKey, String toKey, List<String> errors) {
         Integer from = (Integer) params.get(fromKey);
         Integer to = (Integer) params.get(toKey);
         if (from != null && to != null && from > to) {
-            errors.add("Параметр '" + fromKey + "' должен быть <= '" + toKey + "'");
+            errors.add("«" + label(fromKey) + "» (" + from + ") не может быть больше «" + label(toKey) + "» (" + to + ").");
         }
+    }
+
+    private String label(String key) {
+        return paramSpecs().stream().filter(spec -> spec.key().equals(key)).map(ParamSpec::label).findFirst().orElse(key);
     }
 
     protected static int intParam(Map<String, Object> params, String key) {

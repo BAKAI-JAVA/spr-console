@@ -30,6 +30,20 @@ public enum ConditionOperator {
 
     private final String name;
 
+    /** The condition as a formula of x, the measured value: "x > 8", "5 < x ≤ 8", "статус ∈ Closed, Sold". */
+    public String formula(String value, String valueTo) {
+        return switch (this) {
+            case GT -> "x > " + value;
+            case GTE -> "x ≥ " + value;
+            case LT -> "x < " + value;
+            case LTE -> "x ≤ " + value;
+            case EQ -> "x = " + value;
+            case RANGE -> value + " < x ≤ " + valueTo;
+            case BETWEEN -> value + " ≤ x ≤ " + valueTo;
+            case IN -> "статус ∈ " + value;
+        };
+    }
+
     /** RANGE and BETWEEN have an upper bound in value_to; the other operators have none. */
     public boolean hasValueTo() {
         return this == RANGE || this == BETWEEN;

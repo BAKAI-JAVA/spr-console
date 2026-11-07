@@ -193,31 +193,31 @@ class ConditionOperatorTest {
     void operatorThatDoesNotFitIsAnError() {
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", IN, null)))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: оператор IN (in) не подходит для метрики");
+                .hasMessageContaining("оператор «in» не подходит для метрики");
         assertThatThrownBy(() -> consoleService.create(new StopFactorRequest(KIB_REFUSAL_STATUSES_METRIC, "Тест: статусы",
                 null, null, true, Set.of(), null,
                 List.of(new RuleDto(Map.of(), List.of(new ConditionDto(null, REJECTED, ARRAY, "WrittenOff", GTE, null)))), null), "test"))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: оператор GTE (>=) не подходит для метрики");
+                .hasMessageContaining("оператор «>=» не подходит для метрики");
     }
 
     @Test
     void valueToOnlyForRangeAndBetweenAndAboveValue() {
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", GTE, "20")))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: valueTo указывается только для RANGE и BETWEEN, не для GTE");
+                .hasMessageContaining("Для оператора «>=» оставьте её пустой");
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", null, "20")))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: valueTo указывается только для RANGE и BETWEEN, не для GT");
+                .hasMessageContaining("Для оператора «>» оставьте её пустой");
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", BETWEEN, null)))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: valueTo обязателен для BETWEEN (>= и <=)");
+                .hasMessageContaining("укажите верхнюю границу для оператора «>= и <=»");
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", RANGE, "8")))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: valueTo (8) должно быть больше value (8)");
+                .hasMessageContaining("верхняя граница (8) должна быть больше нижней (8)");
         assertThatThrownBy(() -> create(new ConditionDto(null, REJECTED, INTEGER, "8", BETWEEN, "9.5")))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions[0]: valueTo: значение должно быть целым числом");
+                .hasMessageContaining("верхняя граница: значение должно быть целым числом");
     }
 
     @Test
@@ -225,7 +225,7 @@ class ConditionOperatorTest {
         // every value above 7 is already >= 5
         assertThatThrownBy(() -> create(new ConditionDto(null, UNDERWRITER, INTEGER, "7", GT, null), new ConditionDto(null, REJECTED, INTEGER, "5", GTE, null)))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[0].conditions: UNDERWRITER (> 7) никогда не сработает");
+                .hasMessageContaining("(x > 7) никогда не сработает");
         assertThatThrownBy(() -> create(new ConditionDto(null, UNDERWRITER, INTEGER, "2", LTE, null), new ConditionDto(null, REJECTED, INTEGER, "3", LT, null)))
                 .isInstanceOf(BusinessValidationException.class)
                 .hasMessageContaining("никогда не сработает");

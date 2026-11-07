@@ -115,7 +115,7 @@ class StopFactorTest {
 
         assertThatThrownBy(() -> stopFactor.addRule().setParams(Map.of("months", 3)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Параметр 'months' не определен");
+                .hasMessageContaining("Параметр «months» не задан в метрике");
     }
 
     private static StopFactorMetric bureauRequestsMetric() {

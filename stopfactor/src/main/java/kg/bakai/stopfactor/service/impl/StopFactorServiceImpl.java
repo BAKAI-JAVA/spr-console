@@ -149,8 +149,8 @@ public class StopFactorServiceImpl implements StopFactorService {
     @Transactional
     public void save(String name, String description) {
         StopFactorMetric metric = stopFactorMetricRepository.findFirstByTitleOrNameTemplateOrderById(name, name)
-                .orElseThrow(() -> new BusinessValidationException("Метрика для стоп-фактора '" + name
-                        + "' не найдена, создайте стоп-фактор в консоли с метрикой и параметрами"));
+                .orElseThrow(() -> new BusinessValidationException("Не найдена метрика для стоп-фактора «" + name
+                        + "». Создайте стоп-фактор в консоли: выберите метрику и задайте параметры правил."));
         stopFactorConsoleService.create(new StopFactorRequest(metric.getId(), name, description, null, true, Set.of(), null,
                 List.of(new RuleDto(Map.of(), List.of())), null), SPR_USER);
     }
@@ -169,8 +169,8 @@ public class StopFactorServiceImpl implements StopFactorService {
     public void saveCondition(StopFactorConditionDto dto) {
         StopFactorResponse current = stopFactorConsoleService.get(dto.stopFactorId());
         if (current.rules().size() != 1) {
-            throw new BusinessValidationException("Стоп-фактор " + dto.stopFactorId() + " состоит из " + current.rules().size()
-                    + " правил: условие правила меняется в консоли");
+            throw new BusinessValidationException("Стоп-фактор №" + dto.stopFactorId() + " состоит из " + current.rules().size()
+                    + " правил, поэтому его условие нельзя изменить одним значением. Измените условие нужного правила в консоли.");
         }
         RuleDto rule = current.rules().getFirst();
         Optional<ConditionDto> currentRejected = rule.conditions().stream().filter(c -> c.result() == REJECTED).findFirst();
@@ -191,7 +191,7 @@ public class StopFactorServiceImpl implements StopFactorService {
                 current.productIds(),
                 current.segment(),
                 List.of(new RuleDto(null, rule.name(), rule.params(), conditions, rule.active())),
-                "Условие " + dto.result() + " изменено через StopFactorService.saveCondition"
+                "Условие «" + dto.result().getLabel() + "» изменено из СПР"
         ), SPR_USER);
     }
 

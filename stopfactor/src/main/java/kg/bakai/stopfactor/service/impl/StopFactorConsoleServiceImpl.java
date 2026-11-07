@@ -5,6 +5,7 @@ import kg.bakai.common.enums.ProductSegment;
 import kg.bakai.common.exception.BusinessValidationException;
 import kg.bakai.common.exception.NotFoundException;
 import kg.bakai.stopfactor.util.NameTemplateRenderer;
+import kg.bakai.stopfactor.util.Sentences;
 import kg.bakai.stopfactor.service.StopFactorConsoleService;
 import kg.bakai.stopfactor.dto.ConditionDto;
 import kg.bakai.stopfactor.dto.RuleDto;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
 public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
     private static final String CREATED_REASON = "Создание стоп-фактора";
+    private static final String REASON_REQUIRED = "Укажите причину изменения: она сохраняется в истории версий.";
 
     private final StopFactorRepository stopFactorRepository;
     private final StopFactorMetricRepository metricRepository;
@@ -66,7 +68,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     public List<StopFactorResponse> getVersions(long factorId) {
         List<StopFactor> versions = stopFactorRepository.findVersions(factorId);
         if (versions.isEmpty()) {
-            throw new NotFoundException("Стоп-фактор " + factorId + " не найден");
+            throw notFound(factorId);
         }
         return toResponses(versions);
     }
@@ -75,11 +77,11 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     @Transactional
     public StopFactorResponse create(StopFactorRequest request, String user) {
         StopFactorMetric metric = metricRepository.findById(request.metricId())
-                .orElseThrow(() -> new BusinessValidationException("metricId: метрика " + request.metricId() + " не существует"));
+                .orElseThrow(() -> new BusinessValidationException("Метрика с id " + request.metricId() + " не найдена."));
 
         List<String> errors = new ArrayList<>();
         if (!metric.isActive()) {
-            errors.add("metricId: метрика '" + metric.getTitle() + "' неактивна");
+            errors.add("Метрика «" + metric.getTitle() + "» отключена. Включите её на странице метрик или выберите другую.");
         }
         Definition definition = validateDefinition(metric, request, errors);
         if (!errors.isEmpty()) {
@@ -120,13 +122,13 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
         List<String> errors = new ArrayList<>();
         if (!metric.getId().equals(request.metricId())) {
-            errors.add("metricId: метрику стоп-фактора нельзя изменить, создайте новый стоп-фактор");
+            errors.add("Метрику стоп-фактора изменить нельзя. Чтобы проверять другую метрику, создайте новый стоп-фактор.");
         }
         if (request.changeReason() == null || request.changeReason().isBlank()) {
-            errors.add("changeReason: причина изменения обязательна");
+            errors.add(REASON_REQUIRED);
         }
         if (active && !current.isActive() && !metric.isActive()) {
-            errors.add("active: метрика '" + metric.getTitle() + "' неактивна, активируйте ее перед активацией стоп-фактора");
+            errors.add(metricOff(metric));
         }
         Definition definition = validateDefinition(metric, request, errors);
         if (!errors.isEmpty()) {
@@ -172,15 +174,14 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     @Transactional
     public StopFactorResponse changeStatus(long factorId, boolean active, String changeReason, String user) {
         if (changeReason == null || changeReason.isBlank()) {
-            throw new BusinessValidationException("changeReason: причина изменения обязательна");
+            throw new BusinessValidationException(REASON_REQUIRED);
         }
         StopFactor current = lockAndFindCurrent(factorId);
         if (current.isActive() == active) {
             return get(factorId);
         }
         if (active && !current.getMetric().isActive()) {
-            throw new BusinessValidationException("Метрика '" + current.getMetric().getTitle()
-                    + "' неактивна, активируйте ее перед активацией стоп-фактора");
+            throw new BusinessValidationException(metricOff(current.getMetric()));
         }
 
         StopFactor next = closeAndCreateNextVersion(current, changeReason, user);
@@ -203,17 +204,17 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         Set<Long> requested = new LinkedHashSet<>();
         for (Long factorId : factorIds) {
             if (factorId == null) {
-                errors.add("factorIds: не должен содержать null");
+                errors.add("Список стоп-факторов содержит пустое значение.");
             } else if (!requested.add(factorId)) {
-                errors.add("factorIds: " + factorId + " указан больше одного раза");
+                errors.add("Стоп-фактор №" + factorId + " указан в списке несколько раз.");
             } else if (!byFactorId.containsKey(factorId)) {
-                errors.add("factorIds: стоп-фактор " + factorId + " не существует");
+                errors.add("Стоп-фактор №" + factorId + " не найден.");
             }
         }
         byFactorId.keySet().stream()
                 .filter(id -> !requested.contains(id))
                 .sorted()
-                .forEach(id -> errors.add("factorIds: отсутствует стоп-фактор " + id + ", нужно указать все стоп-факторы"));
+                .forEach(id -> errors.add("В списке нет стоп-фактора №" + id + ": порядок задаётся сразу для всех стоп-факторов."));
         if (!errors.isEmpty()) {
             throw new BusinessValidationException(errors);
         }
@@ -231,7 +232,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     @Transactional
     public void delete(long factorId, String changeReason, String user) {
         if (changeReason == null || changeReason.isBlank()) {
-            throw new BusinessValidationException("changeReason: причина удаления обязательна");
+            throw new BusinessValidationException("Укажите причину удаления: она сохраняется в истории версий.");
         }
         StopFactor current = lockAndFindCurrent(factorId);
         StopFactor last = closeAndCreateNextVersion(current, changeReason, user);
@@ -278,8 +279,8 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
         return changeRules(factorId, rules -> {
             int index = indexOfRule(factorId, rules, ruleId);
             if (rules.size() == 1) {
-                throw new BusinessValidationException("Правило " + ruleId + " единственное у стоп-фактора " + factorId
-                        + ": удалите или деактивируйте стоп-фактор");
+                throw new BusinessValidationException("Нельзя удалить единственное правило стоп-фактора №" + factorId
+                        + ". Чтобы прекратить проверку, отключите или удалите стоп-фактор.");
             }
             rules.remove(index);
             return rules;
@@ -307,7 +308,7 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     public StopFactorResponse deleteCondition(long factorId, long ruleId, StopFactorStatus result, String changeReason, String user) {
         return changeRule(factorId, ruleId, conditions -> {
             if (!conditions.removeIf(c -> c.result() == result)) {
-                throw new NotFoundException("У правила " + ruleId + " нет условия " + result);
+                throw new NotFoundException("У правила нет условия «" + result.getLabel() + "».");
             }
             return conditions;
         }, changeReason, user);
@@ -343,8 +344,8 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
                 return i;
             }
         }
-        throw new NotFoundException("Правило " + ruleId + " не найдено в текущей версии стоп-фактора " + factorId
-                + ": id правил меняются с каждой версией, возьмите их из последнего ответа");
+        throw new NotFoundException("Правило не найдено в текущей версии стоп-фактора №" + factorId
+                + ". Возможно, стоп-фактор уже изменён: обновите страницу и повторите действие.");
     }
 
     /** A rule name given in the request that differs from the current one; a name left out keeps the current one. */
@@ -372,22 +373,23 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
     private Definition validateDefinition(StopFactorMetric metric, StopFactorRequest request, List<String> errors) {
         List<RuleDto> requestRules = request.rules() != null ? request.rules() : List.of();
         if (requestRules.isEmpty()) {
-            errors.add("rules: нужно хотя бы одно правило");
+            errors.add("Добавьте хотя бы одно правило.");
         }
         List<RuleDefinition> rules = new ArrayList<>();
         Map<Map<String, Object>, Integer> ruleByParams = new HashMap<>();
         for (int i = 0; i < requestRules.size(); i++) {
             RuleDto rule = requestRules.get(i);
-            String prefix = "rules[" + i + "].";
+            String prefix = "Правило " + (i + 1) + ": ";
             List<String> ruleErrors = new ArrayList<>();
             Map<String, Object> params = validator.validateParams(metric, rule.params(), ruleErrors);
             List<ConditionDto> conditions = validator.validateConditions(metric,
                     rule.conditions() != null ? rule.conditions() : List.of(), ruleErrors);
-            ruleErrors.forEach(error -> errors.add(prefix + error));
+            ruleErrors.forEach(error -> errors.add(prefix + Sentences.lowerFirst(error)));
             if (ruleErrors.isEmpty()) {
                 Integer same = ruleByParams.putIfAbsent(params, i);
                 if (same != null) {
-                    errors.add("rules[" + i + "]: параметры совпадают с rules[" + same + "]");
+                    errors.add("Правило " + (i + 1) + " повторяет правило " + (same + 1) + ": у них одинаковые параметры."
+                            + " Измените параметры одного из правил или удалите лишнее.");
                 }
             }
             rules.add(new RuleDefinition(blankToNull(rule.name()), params, conditions, rule.active() == null || rule.active()));
@@ -436,13 +438,21 @@ public class StopFactorConsoleServiceImpl implements StopFactorConsoleService {
 
     private StopFactor lockAndFindCurrent(long factorId) {
         stopFactorRepository.lockFactor(factorId)
-                .orElseThrow(() -> new NotFoundException("Стоп-фактор " + factorId + " не найден"));
+                .orElseThrow(() -> notFound(factorId));
         return findCurrent(factorId);
     }
 
     private StopFactor findCurrent(long factorId) {
         return stopFactorRepository.findCurrent(factorId)
-                .orElseThrow(() -> new NotFoundException("Стоп-фактор " + factorId + " не найден"));
+                .orElseThrow(() -> notFound(factorId));
+    }
+
+    private static NotFoundException notFound(long factorId) {
+        return new NotFoundException("Стоп-фактор №" + factorId + " не найден.");
+    }
+
+    private static String metricOff(StopFactorMetric metric) {
+        return "Стоп-фактор нельзя включить: его метрика «" + metric.getTitle() + "» отключена. Сначала включите метрику.";
     }
 
     private static String blankToNull(String value) {

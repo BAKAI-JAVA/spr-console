@@ -98,7 +98,7 @@ class StopFactorProductQueriesTest {
     void unknownProductIdIsRejectedByTheConsole() {
         assertThatThrownBy(() -> stopFactorConsoleService.create(stopFactorRequest(Set.of(PRODUCT_A, UNKNOWN_PRODUCT)), "test"))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("productIds: продукт " + UNKNOWN_PRODUCT + " не существует")
+                .hasMessageContaining("Продукт с id " + UNKNOWN_PRODUCT + " не найден")
                 .hasMessageNotContaining("продукт " + PRODUCT_A + " ");
     }
 

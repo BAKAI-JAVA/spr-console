@@ -95,7 +95,7 @@ public class StopFactorRule extends BaseEntity {
         params.forEach((key, value) -> {
             if (value != null) {
                 MetricParamSchema definition = metric.findParam(key).orElseThrow(() -> new IllegalArgumentException(
-                        "Параметр '" + key + "' не определен в метрике '" + metric.getTitle() + "'"));
+                        "Параметр «" + key + "» не задан в метрике «" + metric.getTitle() + "»."));
                 values.put(definition.key(), value);
             }
         });

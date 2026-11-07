@@ -44,11 +44,11 @@ public class StopFactorDefinitionValidator {
         int errorsBefore = errors.size();
         source.keySet().stream()
                 .filter(key -> !schema.containsKey(key))
-                .forEach(key -> errors.add("params: неизвестный параметр '" + key + "' для метрики '" + metricTitle + "'"));
+                .forEach(key -> errors.add("Параметр «" + key + "» не задан в метрике «" + metricTitle + "»."));
         schema.values().stream()
                 .filter(MetricParamSchema::required)
                 .filter(p -> source.get(p.key()) == null || (source.get(p.key()) instanceof String s && s.isBlank()))
-                .forEach(p -> errors.add("params: '" + p.key() + "' (" + p.label() + ") обязателен"));
+                .forEach(p -> errors.add("Укажите «" + p.label() + "»."));
         if (errors.size() > errorsBefore) {
             return Map.of();
         }
@@ -56,7 +56,7 @@ public class StopFactorDefinitionValidator {
         try {
             return calculatorRegistry.get(calculator).normalizeParams(source);
         } catch (InvalidParamsException e) {
-            e.getErrors().forEach(error -> errors.add("params: " + error));
+            errors.addAll(e.getErrors());
             return Map.of();
         }
     }
@@ -75,23 +75,25 @@ public class StopFactorDefinitionValidator {
 
         for (int i = 0; i < conditions.size(); i++) {
             ConditionDto condition = conditions.get(i);
-            String prefix = "conditions[" + i + "]: ";
             if (!CONDITION_RESULTS.contains(condition.result())) {
-                errors.add(prefix + "result должен быть REJECTED или UNDERWRITER");
+                errors.add("Условие " + (i + 1) + ": результат должен быть «" + StopFactorStatus.REJECTED.getLabel()
+                        + "» или «" + StopFactorStatus.UNDERWRITER.getLabel() + "».");
                 continue;
             }
+            String prefix = "Условие «" + condition.result().getLabel() + "»: ";
             if (!seenResults.add(condition.result())) {
-                errors.add(prefix + "допускается только одно условие " + condition.result());
+                errors.add("Условие «" + condition.result().getLabel() + "» указано несколько раз: у правила может быть"
+                        + " только одно такое условие.");
                 continue;
             }
             if (!kind.conditionTypes().contains(condition.valueType())) {
-                errors.add(prefix + "тип значения " + condition.valueType() + " не подходит для метрики '" + metric.getTitle()
-                        + "', допустимые: " + new TreeSet<>(kind.conditionTypes()));
+                errors.add(prefix + "тип значения «" + condition.valueType().getLabel() + "» не подходит для метрики «"
+                        + metric.getTitle() + "». Допустимые типы: " + labels(kind.conditionTypes()) + ".");
                 continue;
             }
             if (condition.operator() != null && !kind.operators().contains(condition.operator())) {
-                errors.add(prefix + "оператор " + condition.operator() + " (" + condition.operator().getName()
-                        + ") не подходит для метрики '" + metric.getTitle() + "', допустимые: " + kind.operators());
+                errors.add(prefix + "оператор «" + condition.operator().getName() + "» не подходит для метрики «"
+                        + metric.getTitle() + "». Допустимые операторы: " + operators(kind.operators()) + ".");
                 continue;
             }
             String value = normalizeValue(condition.valueType(), condition.value(), prefix, errors);
@@ -124,17 +126,19 @@ public class StopFactorDefinitionValidator {
         boolean sent = condition.valueTo() != null && !condition.valueTo().isBlank();
         if (!operator.hasValueTo()) {
             if (sent) {
-                errors.add(prefix + "valueTo указывается только для RANGE и BETWEEN, не для " + operator);
+                errors.add(prefix + "верхняя граница задаётся только для операторов «" + ConditionOperator.RANGE.getName()
+                        + "» и «" + ConditionOperator.BETWEEN.getName() + "». Для оператора «" + operator.getName()
+                        + "» оставьте её пустой.");
             }
             return null;
         }
         if (!sent) {
-            errors.add(prefix + "valueTo обязателен для " + operator + " (" + operator.getName() + ")");
+            errors.add(prefix + "укажите верхнюю границу для оператора «" + operator.getName() + "».");
             return null;
         }
-        String valueTo = normalizeValue(condition.valueType(), condition.valueTo(), prefix + "valueTo: ", errors);
+        String valueTo = normalizeValue(condition.valueType(), condition.valueTo(), prefix + "верхняя граница: ", errors);
         if (valueTo != null && ConditionValues.parseNumber(valueTo).compareTo(ConditionValues.parseNumber(value)) <= 0) {
-            errors.add(prefix + "valueTo (" + valueTo + ") должно быть больше value (" + value + ")");
+            errors.add(prefix + "верхняя граница (" + valueTo + ") должна быть больше нижней (" + value + ").");
             return null;
         }
         return valueTo;
@@ -181,7 +185,7 @@ public class StopFactorDefinitionValidator {
         productIds.stream()
                 .filter(id -> !found.contains(id))
                 .sorted()
-                .forEach(id -> errors.add("productIds: продукт " + id + " не существует"));
+                .forEach(id -> errors.add("Продукт с id " + id + " не найден."));
     }
 
     private String normalizeValue(StopFactorValueTypes type, String raw, String prefix, List<String> errors) {
@@ -191,12 +195,12 @@ public class StopFactorDefinitionValidator {
                 try {
                     BigDecimal number = ConditionValues.parseNumber(value);
                     if (number.signum() < 0) {
-                        errors.add(prefix + "значение не должно быть отрицательным");
+                        errors.add(prefix + "значение не может быть отрицательным.");
                         return null;
                     }
                     return number.toBigIntegerExact().toString();
                 } catch (NumberFormatException | ArithmeticException e) {
-                    errors.add(prefix + "значение должно быть целым числом");
+                    errors.add(prefix + "значение должно быть целым числом, получено «" + value + "».");
                     return null;
                 }
             }
@@ -204,12 +208,12 @@ public class StopFactorDefinitionValidator {
                 try {
                     BigDecimal number = ConditionValues.parseNumber(value);
                     if (number.signum() < 0) {
-                        errors.add(prefix + "значение не должно быть отрицательным");
+                        errors.add(prefix + "значение не может быть отрицательным.");
                         return null;
                     }
                     return number.stripTrailingZeros().toPlainString();
                 } catch (NumberFormatException e) {
-                    errors.add(prefix + "значение должно быть числом");
+                    errors.add(prefix + "значение должно быть числом, получено «" + value + "».");
                     return null;
                 }
             }
@@ -219,17 +223,18 @@ public class StopFactorDefinitionValidator {
                         .filter(s -> !s.isEmpty())
                         .toList();
                 if (items.isEmpty()) {
-                    errors.add(prefix + "значение должно содержать хотя бы один элемент");
+                    errors.add(prefix + "укажите хотя бы один статус кредита.");
                     return null;
                 }
                 if (type == StopFactorValueTypes.STRING && items.size() > 1) {
-                    errors.add(prefix + "значение STRING должно быть одним элементом, для списка используйте ARRAY");
+                    errors.add(prefix + "тип «" + StopFactorValueTypes.STRING.getLabel() + "» принимает один статус."
+                            + " Для нескольких статусов выберите тип «" + StopFactorValueTypes.ARRAY.getLabel() + "».");
                     return null;
                 }
                 Set<String> unique = new HashSet<>();
                 for (String item : items) {
                     if (!unique.add(ConditionValues.normalizeItem(item))) {
-                        errors.add(prefix + "элемент '" + item + "' повторяется");
+                        errors.add(prefix + "статус «" + item + "» указан несколько раз.");
                         return null;
                     }
                 }
@@ -248,23 +253,32 @@ public class StopFactorDefinitionValidator {
         }
         if (kind == ValueKind.NUMBER) {
             if (NumberSet.of(underwriter.get()).within(NumberSet.of(rejected.get()))) {
-                errors.add("conditions: UNDERWRITER (" + describe(underwriter.get()) + ") никогда не сработает: все его значения"
-                        + " уже дают REJECTED (" + describe(rejected.get()) + "), REJECTED проверяется первым");
+                errors.add("Условие «" + StopFactorStatus.UNDERWRITER.getLabel() + "» (" + describe(underwriter.get())
+                        + ") никогда не сработает: при всех этих значениях уже срабатывает «" + StopFactorStatus.REJECTED.getLabel()
+                        + "» (" + describe(rejected.get()) + "), который проверяется первым. Сузьте условие «"
+                        + StopFactorStatus.UNDERWRITER.getLabel() + "» до значений, при которых отказа нет.");
             }
         } else {
             Set<String> overlap = new HashSet<>(ConditionValues.parseItems(rejected.get().value()));
             overlap.retainAll(ConditionValues.parseItems(underwriter.get().value()));
             if (!overlap.isEmpty()) {
-                errors.add("conditions: значения " + new TreeSet<>(overlap)
-                        + " указаны и в REJECTED, и в UNDERWRITER, они всегда будут REJECTED");
+                errors.add("Статусы " + String.join(", ", new TreeSet<>(overlap)) + " указаны в обоих условиях. Для них всегда"
+                        + " срабатывает «" + StopFactorStatus.REJECTED.getLabel() + "», поэтому уберите их из условия «"
+                        + StopFactorStatus.UNDERWRITER.getLabel() + "».");
             }
         }
     }
 
     private static String describe(ConditionDto c) {
-        return c.operator().hasValueTo()
-                ? c.operator().getName() + " " + c.value() + ".." + c.valueTo()
-                : c.operator().getName() + " " + c.value();
+        return c.operator().formula(c.value(), c.valueTo());
+    }
+
+    private static String labels(Collection<StopFactorValueTypes> types) {
+        return types.stream().sorted().map(type -> "«" + type.getLabel() + "»").collect(Collectors.joining(", "));
+    }
+
+    private static String operators(Collection<ConditionOperator> operators) {
+        return operators.stream().map(operator -> "«" + operator.getName() + "»").collect(Collectors.joining(", "));
     }
 
     /**

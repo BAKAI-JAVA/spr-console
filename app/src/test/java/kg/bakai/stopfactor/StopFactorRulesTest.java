@@ -216,7 +216,7 @@ class StopFactorRulesTest {
         List<MetricParamSchema> withoutMax = metric.params().stream().filter(p -> !p.key().equals("maxOverdueDays")).toList();
         assertThatThrownBy(() -> metricConsoleService.update(metric.id(), withParams(metric, withoutMax)))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("params: [maxOverdueDays] заданы у стоп-факторов этой метрики");
+                .hasMessageContaining("Параметры maxOverdueDays нельзя убрать");
     }
 
     @Test
@@ -261,11 +261,11 @@ class StopFactorRulesTest {
         assertThatThrownBy(() -> stopFactorConsoleService.create(new StopFactorRequest(OVERDUE_METRIC, null, null, null, true,
                 Set.of(), null, List.of(rule(params), rule(params)), null), "test"))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules[1]: параметры совпадают с rules[0]");
+                .hasMessageContaining("Правило 2 повторяет правило 1: у них одинаковые параметры");
         assertThatThrownBy(() -> stopFactorConsoleService.create(new StopFactorRequest(OVERDUE_METRIC, null, null, null, true,
                 Set.of(), null, List.of(), null), "test"))
                 .isInstanceOf(BusinessValidationException.class)
-                .hasMessageContaining("rules: нужно хотя бы одно правило");
+                .hasMessageContaining("Добавьте хотя бы одно правило");
     }
 
     @Test

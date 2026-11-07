@@ -1,15 +1,23 @@
 package kg.bakai.stopfactor.enums;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
 /**
- * Type of the value of a condition. Keep in sync with ck_stop_factor_condition_value_type.
+ * Type of the value of a condition; the label is what the console and messages call it. Keep in sync with
+ * ck_stop_factor_condition_value_type.
  */
+@Getter
+@RequiredArgsConstructor
 public enum StopFactorValueTypes {
     /** One loan status. */
-    STRING,
+    STRING("Статус"),
     /** A whole number: the highest allowed value. */
-    INTEGER,
+    INTEGER("Целое число"),
     /** A number: the highest allowed value. */
-    DOUBLE,
+    DOUBLE("Число"),
     /** A list of loan statuses separated by commas. */
-    ARRAY
+    ARRAY("Список статусов");
+
+    private final String label;
 }
